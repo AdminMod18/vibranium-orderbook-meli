@@ -189,5 +189,23 @@ Un drill falló: el Postgres conservaba `last_seq=10012` de otra corrida, el jou
 - *¿Cómo escalaría el historial?* Particionar tablas por tiempo, réplicas de lectura, y/o sustituir el proyector por un consumidor de Kafka.
 - *¿Por qué eventualmente consistente?* Para desacoplar; la respuesta incluye `as_of_seq` y el lag es de milisegundos.
 
+## Fase 5 — Observabilidad (`internal/metrics`, `ops/`)
+
+Detalle completo, catálogo de métricas, alertas y mini-runbook en [OBSERVABILIDAD.md](OBSERVABILIDAD.md).
+
+### Cómo contarlo
+- **Tres pilares**: métricas (Prometheus), logs estructurados con `request_id`, y perfiles (`pprof`). Trazas distribuidas: siguiente paso.
+- **Cada métrica responde una pregunta operativa**, no hay métricas "por si acaso".
+- **Lo que más importa en este sistema**: profundidad y espera en cola (¿saturado?), duración del fsync (¿disco?), tamaño de lote (¿group commit funciona?), lag del proyector (¿historial al día?).
+- **Backpressure visible**: 503 contados y alertados; nunca un error silencioso.
+- **Una demo potente**: tumbar Postgres con carga y ver en Grafana cómo el lag del historial sube y vuelve a cero mientras las órdenes siguen entrando.
+
+### Preguntas probables
+- *¿Por qué Prometheus y Grafana?* Son capas distintas (almacenar/alertar vs. visualizar); estándar abierto; si usan otra plataforma las métricas siguen sirviendo.
+- *¿Cómo evitas que las métricas exploten en cardinalidad?* Etiquetas acotadas: rutas por patrón, resultados en un conjunto fijo; hay un test.
+- *¿Qué mirarías si p99 sube?* Espera en cola vs fsync: dice si es CPU del matching o el disco.
+- *¿Mediste 5.000 órdenes/s?* Sí, con generador open-loop (sin coordinated omission): 150.000 órdenes, 100 % aceptadas, p99 16-29 ms en condiciones limpias, saldos auditados. Con otra actividad pesada en la misma máquina las colas empeoran; lo digo y lo documento en lugar de ocultarlo.
+- *¿Y los logs?* JSON, con `request_id`; solo anomalías a `warn` para no ahogar el sistema a 5.000 req/s.
+
 ## Próximas fases
-5. Observabilidad (métricas Prometheus, logs, Grafana) · 6. Prueba de carga a 5.000+ órdenes/s y más drills de fallos.
+6. Cierre: informe de pruebas de carga y fallos, perfilado con `pprof` si hace falta, y guion de la presentación.

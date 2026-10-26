@@ -47,5 +47,22 @@ has "el historial alcanzó al journal (lag 0)" "$r" '"lag":0'
 has "saldo recalculado desde el historial == saldo del motor" "$r" '"consistent":true'
 has "la orden y sus trades son consultables" "$(curl -s "$A/orders/s-$RUN")" '"status":"FILLED"'
 
+echo "6) Observabilidad"
+M=${METRICS:-localhost:9102}
+has "GET /readyz = 200" "$(code "$A/readyz")" 200
+r=$(curl -s "$M/metrics")
+has "/metrics (puerto de administración) expone las órdenes" "$r" 'orderbook_orders_total{result="accepted"'
+has "/metrics expone la cola del secuenciador" "$r" 'orderbook_queue_capacity'
+has "/metrics NO está en el puerto público de la API" "$(code "$A/metrics")" 404
+PR=${PROMETHEUS:-localhost:9090}
+if [ "$(code "$PR/-/ready")" = 200 ]; then
+  t=""; for i in $(seq 1 20); do t=$(curl -s "$PR/api/v1/targets"); [[ "$t" == *'"health":"up"'* ]] && break; sleep 1; done
+  has "Prometheus está leyendo las métricas de la app" "$t" '"health":"up"'
+else printf '  [AVISO] Prometheus no responde en %s (omitido)\n' "$PR"; fi
+GR=${GRAFANA:-localhost:3000}
+if [ "$(code "$GR/api/health")" = 200 ]; then
+  has "Grafana tiene el dashboard provisionado" "$(curl -s -u admin:admin "$GR/api/search?query=Order")" 'orderbook-overview'
+else printf '  [AVISO] Grafana no responde en %s (omitido)\n' "$GR"; fi
+
 echo
 if [ "$FAILS" = 0 ]; then echo "SMOKE OK: todo funciona."; else echo "SMOKE FALLÓ: $FAILS comprobación(es)."; exit 1; fi

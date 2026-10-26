@@ -71,6 +71,20 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 | D40 | El servidor **arranca aunque Postgres no esté listo** (por eso `depends_on` sin `service_healthy`) | El mercado no debe depender del historial; el proyector reintenta con backoff exponencial | Esperar a Postgres: acopla disponibilidad del mercado a la del historial | ✅ |
 | D41 | Un único proyector escribiendo por historial | Dos proyectores sobre el mismo Postgres se pisarían | *Leader election* / advisory lock si se escalara | 🟡 (L7) |
 
+## Observabilidad (Fase 5)
+
+| # | Decisión | Por qué | Alternativas / costo | Estado |
+|---|---|---|---|---|
+| D42 | **Prometheus (recoge/guarda/alerta) + Grafana (dashboards)**, no una u otra | Son capas distintas; es el stack más extendido y el formato `/metrics` es estándar abierto leíble por casi cualquier plataforma | Datadog/New Relic: comerciales, requieren cuenta; OpenTelemetry: más amplio pero más pesado para un MVP | ✅ |
+| D43 | `/metrics` y `pprof` en un **puerto de administración separado** (9102) | No exponer métricas ni perfiles junto a la API pública; en producción ese puerto solo es alcanzable desde la red interna | Mismo puerto: más simple, pero filtra información interna | ✅ |
+| D44 | Etiqueta `route` = **patrón** de la ruta, no la URL | Cardinalidad acotada: mil `order_id` no crean mil series (test incluido) | URL real: explota la memoria de Prometheus | ✅ |
+| D45 | El secuenciador emite mediciones por una interfaz `Observer` | El paquete no depende de ninguna librería de métricas; se prueba y se cambia sin tocarlo | Importar Prometheus en el secuenciador: acoplamiento | ✅ |
+| D46 | **No se loguea cada request** (solo anomalías en `warn`; detalle con `LOG_LEVEL=debug`) | A 5.000 req/s un log por request es ruido y costo; las métricas ya dan el agregado | Log por request: útil en debug, no en producción | ✅ |
+| D47 | `/readyz` **sin dependencia de Postgres** | Coherente con D40: el mercado no depende del historial | Readiness que incluya Postgres: un corte del historial sacaría el servicio del balanceador | ✅ |
+| D48 | Generador de carga **open-loop** (latencia desde la hora en que debió salir) | Evita *coordinated omission*: si el servidor se atrasa, el cliente no lo oculta | Closed-loop: más simple pero subestima la latencia bajo carga | ✅ |
+| D49 | Alertas como **reglas en Prometheus** (8), sin Alertmanager | Muestran *qué* se vigilaría y con qué umbrales; enrutar a Slack/PagerDuty es configuración, no diseño | Alertmanager completo: fuera del MVP | 🟡 |
+| D50 | Grafana con **acceso anónimo de solo lectura** y `admin/admin` | Comodidad de demo local: se abre el dashboard sin login | En producción: SSO y sin credenciales por defecto | 🟡 (solo local) |
+
 ## Plataforma
 
 | # | Decisión | Por qué | Estado |
@@ -101,3 +115,5 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 
 - **L8 — La etapa de *build* del `Dockerfile` no se pudo ejecutar en el entorno de desarrollo** (los contenedores de build no tenían salida a internet para `go mod download`). Sí se verificó con **Docker real**: la topología completa del compose (Postgres + app, red, volúmenes, healthchecks, política de reinicio) usando un binario compilado en el host con la misma etapa de runtime; el binario estático compila. Antes de la presentación, correr `docker compose up --build` en una máquina con internet.
 - **L9 — El proyector relee el journal desde el inicio al arrancar** (salta lo ya reflejado). Es O(tamaño del log); con segmentos rotados + índice sería O(1). Ver `MEJORAS.md`.
+- **L10 — Las cifras de rendimiento se midieron en una máquina de 4 núcleos compartida** con disco virtual. Son una referencia, no una garantía; ver `OBSERVABILIDAD.md` (condiciones y colas largas bajo contención). Repetir en la máquina de la presentación.
+- **L11 — Sin trazas distribuidas.** Hay métricas y logs con `request_id`, pero no OpenTelemetry (ver `MEJORAS.md`).

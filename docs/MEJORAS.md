@@ -43,13 +43,16 @@ Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 | 🟠 | ¿Escala el proyector? | Un lote de hasta 5.000 registros por transacción con pipeline | Particionar por tiempo; COPY para cargas masivas; consumidor Kafka |
 | 🟢 | ¿Dos proyectores? | No soportado (D41) | *Advisory lock* de Postgres para elegir líder |
 
-## Observabilidad (Fase 5)
-| Pri | Pregunta | Plan |
+## Observabilidad
+| Pri | Pregunta | Estado |
 |---|---|---|
-| 🔴 | ¿Cómo sabes que funciona? | Métricas Prometheus: órdenes/s, latencia p50/p99 por endpoint, **profundidad de cola**, tamaño de lote y duración de fsync, trades/s, rechazos por causa |
-| 🔴 | ¿Cómo depuras una orden? | Logs estructurados JSON con `order_id`, `user_id`, `seq`; `trace_id` por request |
-| 🟠 | ¿Qué alertas pondrías? | Cola > 80%, fsync p99 alto, lag del proyector, `/audit` ≠ ok, reinicios |
-| 🟢 | Dashboard | Grafana provisionado en `docker-compose` |
+| 🔴 | ¿Cómo sabes que funciona? | ✅ Métricas Prometheus + dashboard Grafana provisionado (ver `OBSERVABILIDAD.md`) |
+| 🔴 | ¿Cómo depuras una orden? | ✅ Logs JSON con `request_id`/`order_id`; `GET /orders/{id}` con historial |
+| 🟠 | ¿Qué alertas pondrías? | ✅ 8 reglas en Prometheus · ⏭ Alertmanager → Slack/PagerDuty |
+| 🟠 | ¿Y las trazas? | ⏭ **OpenTelemetry**: span por request que atraviese cola → matching → fsync; *exemplars* para saltar de una métrica a su traza |
+| 🟠 | ¿SLOs? | ⏭ Definir SLO (p.ej. 99 % de órdenes < 100 ms) y alertar por *burn rate* |
+| 🟢 | ¿Métricas por instrumento? | ⏭ Etiqueta `instrument` al particionar el mercado (cardinalidad baja) |
+| 🟢 | ¿Quién protege `/metrics` y `pprof`? | Puerto de administración aparte (hecho); en producción, red interna / mTLS |
 
 ## Seguridad (fuera del MVP, pero mencionable)
 Autenticación/autorización por usuario (hoy el `user_id` va en el body), límites de tamaño ya aplicados (1 MB), validación estricta de campos (ya), TLS en el balanceador, rate limiting.

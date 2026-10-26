@@ -12,6 +12,18 @@ curl localhost:8080/healthz
 ./scripts/smoke.sh               # prueba de humo end-to-end
 ```
 
+| | |
+|---|---|
+| API | http://localhost:8080 |
+| **Grafana (dashboard)** | http://localhost:3000 |
+| Prometheus / alertas | http://localhost:9090 |
+| Métricas / pprof | http://localhost:9102 |
+
+```bash
+docker compose run --rm loadgen -rate 5000 -duration 30s   # genera carga y audita los saldos al final
+```
+![Dashboard](docs/img/dashboard-grafana.png)
+
 ## Probar sin Docker
 ```bash
 go test -race ./...
@@ -30,7 +42,7 @@ curl localhost:8080/audit/history/alice   # saldo del motor vs recalculado solo 
 ```
 
 ## Estado
-Fases 1-4 completas: motor de matching, billeteras con reserva de fondos, API + secuenciador, journal durable con group commit y recuperación, e historial en Postgres.
+Fases 1-5 completas: motor de matching, billeteras con reserva de fondos, API + secuenciador, journal durable con group commit y recuperación, historial en Postgres y observabilidad (Prometheus + Grafana).
 
 ## Probar resiliencia
 ```bash
@@ -46,3 +58,5 @@ El estado se guarda en `data/journal.log` (`JOURNAL_PATH`).
 - [docs/DECISIONES.md](docs/DECISIONES.md) — registro de decisiones, limitaciones conocidas y preguntas para el equipo evaluador.
 - [docs/DEFENSA.md](docs/DEFENSA.md) — explicación fase a fase con preguntas probables.
 - [docs/MEJORAS.md](docs/MEJORAS.md) — backlog de arquitectura: preguntas probables y siguiente paso.
+- [docs/OBSERVABILIDAD.md](docs/OBSERVABILIDAD.md) — métricas, alertas, dashboard, resultados medidos y runbook.
+- [docs/EJECUTAR_LOCAL.md](docs/EJECUTAR_LOCAL.md) — cómo correrlo en tu máquina.

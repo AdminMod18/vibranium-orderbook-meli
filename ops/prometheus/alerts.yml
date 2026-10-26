@@ -1,0 +1,64 @@
+# Reglas de alerta (visibles en http://localhost:9090/alerts). En producción se enviarían a
+# Alertmanager -> PagerDuty/Slack; para el MVP se evalúan y se muestran en la UI de Prometheus.
+groups:
+  - name: orderbook
+    rules:
+      - alert: OrderbookDown
+        expr: up{job="orderbook"} == 0
+        for: 30s
+        labels: {severity: critical}
+        annotations:
+          summary: "El order book no responde al scrape"
+          runbook: "docker compose ps / logs orderbook. Si reinició, revisar 'journal recuperado' en los logs."
+
+      - alert: QueueNearlyFull
+        expr: orderbook_queue_depth / orderbook_queue_capacity > 0.8
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "La cola del secuenciador supera el 80%"
+          description: "El matching no da abasto con la entrada: pronto habrá 503. Ver latencia de fsync y CPU."
+
+      - alert: BackpressureActive
+        expr: rate(orderbook_queue_rejected_total[1m]) > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "Se están rechazando órdenes por cola llena (HTTP 503)"
+
+      - alert: FsyncSlow
+        expr: histogram_quantile(0.99, sum by (le) (rate(orderbook_journal_fsync_seconds_bucket[2m]))) > 0.05
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "p99 de fsync del journal > 50 ms"
+          description: "El disco es el cuello de botella: todas las órdenes esperan este fsync."
+
+      - alert: OrderLatencyHigh
+        expr: histogram_quantile(0.99, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route="POST /orders"}[2m]))) > 0.25
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "p99 de POST /orders > 250 ms"
+
+      - alert: ServerErrors
+        expr: sum(rate(orderbook_http_requests_total{code=~"5xx|504"}[1m])) > 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "El servicio devuelve errores 5xx/504 (distintos de 503 por backpressure)"
+
+      - alert: ProjectorDown
+        expr: orderbook_projector_up == 0
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "El historial en Postgres no se está actualizando"
+          description: "El MERCADO no se ve afectado (el journal es la fuente de verdad). Revisar Postgres y los logs del proyector."
+
+      - alert: ProjectorLagging
+        expr: orderbook_projector_lag > 10000
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "El historial atrasa más de 10.000 registros"

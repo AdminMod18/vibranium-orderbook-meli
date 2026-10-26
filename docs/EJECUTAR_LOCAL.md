@@ -31,12 +31,21 @@ Servicios y puertos:
 |---|---|
 | API del order book | http://localhost:8080 |
 | Postgres (historial) | localhost:5432 · usuario `postgres` · clave `orderbook` · BD `orderbook` |
+| **Grafana (dashboard)** | http://localhost:3000 (abre directo; editar: `admin` / `admin`) |
+| Prometheus y alertas | http://localhost:9090 · http://localhost:9090/alerts |
+| Métricas y pprof | http://localhost:9102/metrics |
 
 ## 2) Comprobar que funciona
 ```bash
 ./scripts/smoke.sh
 ```
 Recorre el ciclo completo (depósitos, cruce de órdenes, parciales, cancelación, idempotencia, saldo insuficiente, auditoría e historial) y termina con `SMOKE OK`, o te dice qué comprobación falló.
+
+Para ver el dashboard moverse (no necesita Go; corre dentro de Docker y al final audita los saldos):
+```bash
+docker compose run --rm loadgen -rate 5000 -duration 30s
+```
+Abre http://localhost:3000 mientras corre.
 
 Para probar a mano (Git Bash; en PowerShell usa `curl.exe` y comillas distintas, o simplemente usa Git Bash):
 ```bash

@@ -16,10 +16,14 @@ services:
 
   orderbook:
     build: .
-    ports: ["8080:8080"]
+    ports:
+      - "8080:8080"
+      - "127.0.0.1:9102:9102"   # métricas/pprof: solo accesibles desde esta máquina
     environment:
       DATABASE_URL: postgres://postgres:orderbook@postgres:5432/orderbook
       QUEUE_SIZE: "50000"
+      ADMIN_PORT: "9102"      # /metrics y pprof (puerto aparte de la API)
+      LOG_LEVEL: info         # debug = una línea por request
     volumes: ["journal:/data"]   # el journal DEBE vivir en un volumen: es la fuente de verdad
     # El servidor arranca y opera aunque Postgres no esté listo (el historial se pone al día solo),
     # por eso no se exige service_healthy: es una decisión de diseño, no un descuido.
@@ -31,6 +35,39 @@ services:
       retries: 10
     restart: unless-stopped
     stop_grace_period: 30s       # deja tiempo al apagado ordenado (vaciar cola y cerrar journal)
+
+  # Generador de carga (no arranca con `up`). Uso:
+  #   docker compose run --rm loadgen -rate 5000 -duration 30s
+  loadgen:
+    build: .
+    entrypoint: ["/loadgen"]
+    command: ["-rate", "3000", "-duration", "30s"]
+    environment:
+      LOADGEN_URL: http://orderbook:8080
+    profiles: ["load"]
+    depends_on: [orderbook]
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=2d"]
+    volumes: ["./ops/prometheus:/etc/prometheus:ro"]
+    ports: ["9090:9090"]
+    depends_on: [orderbook]
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin                 # demo local: usuario admin / clave admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"                 # lectura sin login para la demo
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/orderbook.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
 
 volumes:
   pgdata:

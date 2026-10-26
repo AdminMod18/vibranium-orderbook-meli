@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/engine"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/exchange"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/history"
+	"github.com/AdminMod18/vibranium-orderbook-meli/internal/metrics"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/sequencer"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/wallet"
 )
@@ -38,9 +40,21 @@ type History interface {
 type API struct {
 	seq  *sequencer.Sequencer
 	hist History
+	m    *metrics.Metrics // nil = sin métricas
+	log  *slog.Logger
 }
 
-func New(seq *sequencer.Sequencer) *API { return &API{seq: seq} }
+func New(seq *sequencer.Sequencer) *API {
+	return &API{seq: seq, log: slog.New(slog.NewTextHandler(discard{}, nil))}
+}
+
+type discard struct{}
+
+func (discard) Write(p []byte) (int, error) { return len(p), nil }
+
+// WithMetrics y WithLogger habilitan la observabilidad (opcionales: sin ellas todo funciona igual).
+func (a *API) WithMetrics(m *metrics.Metrics) *API { a.m = m; return a }
+func (a *API) WithLogger(l *slog.Logger) *API      { a.log = l; return a }
 
 // WithHistory habilita los endpoints de consulta histórica.
 func (a *API) WithHistory(h History) *API { a.hist = h; return a }
@@ -59,7 +73,81 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /trades", a.listTrades)
 	mux.HandleFunc("GET /audit/history/{user}", a.auditHistory)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	return mux
+	mux.HandleFunc("GET /readyz", a.readyz)
+	return a.observe(mux)
+}
+
+// readyz indica si esta instancia puede recibir tráfico: el secuenciador debe estar activo.
+// Postgres NO es requisito a propósito (decisión D40): el mercado no depende del historial.
+func (a *API) readyz(w http.ResponseWriter, _ *http.Request) {
+	status := http.StatusOK
+	if a.seq.Stopped() {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, map[string]any{"ready": status == http.StatusOK,
+		"queue_depth": a.seq.QueueLen(), "queue_capacity": a.seq.QueueCap(), "journal_seq": a.seq.JournalSeq()})
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	code int
+}
+
+func (w *statusWriter) WriteHeader(c int) { w.code = c; w.ResponseWriter.WriteHeader(c) }
+
+// observe es el único middleware: identifica la request (X-Request-ID), mide y registra.
+// Se aplica DIRECTAMENTE sobre el mux para poder leer r.Pattern (la ruta) una vez enrutada.
+func (a *API) observe(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.Header.Get("X-Request-ID")
+		if id == "" {
+			id = newID()
+		}
+		w.Header().Set("X-Request-ID", id)
+
+		sw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
+		a.m.InFlight(1)
+		start := time.Now()
+		next.ServeHTTP(sw, r)
+		d := time.Since(start)
+		a.m.InFlight(-1)
+
+		route := r.Pattern
+		if route == "" {
+			route = "unmatched"
+		}
+		a.m.HTTP(route, r.Method, sw.code, d)
+
+		// Con 5.000 req/s no se loguea cada request: solo lo anómalo (a nivel Warn);
+		// el detalle completo se activa con LOG_LEVEL=debug.
+		switch {
+		case sw.code >= 500 && sw.code != http.StatusServiceUnavailable, d > 250*time.Millisecond:
+			a.log.Warn("request anómala", "request_id", id, "route", route, "code", sw.code, "duration_ms", d.Milliseconds())
+		case a.log.Enabled(r.Context(), slog.LevelDebug):
+			a.log.Debug("request", "request_id", id, "route", route, "code", sw.code, "duration_us", d.Microseconds())
+		}
+	})
+}
+
+// errorKind clasifica un error para métricas y logs (valores de etiqueta acotados).
+func errorKind(err error) string {
+	switch {
+	case errors.Is(err, engine.ErrInvalidOrder), errors.Is(err, wallet.ErrInvalidAmount):
+		return "invalid"
+	case errors.Is(err, wallet.ErrInsufficientFunds):
+		return "insufficient_funds"
+	case errors.Is(err, exchange.ErrDuplicateOrder):
+		return "duplicate"
+	case errors.Is(err, engine.ErrOrderNotFound):
+		return "not_found"
+	case errors.Is(err, sequencer.ErrOverloaded):
+		return "overloaded"
+	case errors.Is(err, sequencer.ErrStopped):
+		return "stopped"
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return "timeout"
+	}
+	return "error"
 }
 
 // --- DTOs (formato público; el dominio interno no se expone directamente) ---
@@ -130,6 +218,7 @@ func (a *API) placeOrder(w http.ResponseWriter, r *http.Request) {
 	case "SELL":
 		side = domain.Sell
 	default:
+		a.m.Order("UNKNOWN", "invalid")
 		writeError(w, http.StatusBadRequest, "invalid_side", "side debe ser BUY o SELL")
 		return
 	}
@@ -144,8 +233,20 @@ func (a *API) placeOrder(w http.ResponseWriter, r *http.Request) {
 		Price: domain.Price(req.Price), Qty: domain.Qty(req.Qty),
 	})
 	if err != nil {
+		a.m.Order(req.Side, errorKind(err))
+		if errorKind(err) == "error" {
+			a.log.Error("error procesando orden", "order_id", req.ID, "user_id", req.UserID, "err", err)
+		}
 		writeDomainError(w, err)
 		return
+	}
+	a.m.Order(req.Side, "accepted")
+	for _, t := range res.Trades { // cada trade aparece UNA vez: en la respuesta de la orden taker
+		a.m.Trade(int64(t.Qty), t.Total())
+	}
+	if a.log.Enabled(r.Context(), slog.LevelDebug) {
+		a.log.Debug("orden procesada", "order_id", req.ID, "user_id", req.UserID, "side", req.Side,
+			"status", res.Order.Status.String(), "trades", len(res.Trades))
 	}
 	writeJSON(w, http.StatusCreated, orderResponse{Order: toOrderView(res.Order), Trades: toTradeViews(res.Trades)})
 }
@@ -155,9 +256,11 @@ func (a *API) cancelOrder(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	o, err := a.seq.Cancel(ctx, r.PathValue("id"))
 	if err != nil {
+		a.m.Cancel(errorKind(err))
 		writeDomainError(w, err)
 		return
 	}
+	a.m.Cancel("ok")
 	writeJSON(w, http.StatusOK, toOrderView(o))
 }
 

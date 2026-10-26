@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/domain"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/engine"
@@ -29,6 +30,15 @@ var (
 	ErrStopped    = errors.New("secuenciador detenido")
 )
 
+// Observer recibe mediciones internas del secuenciador (la implementación vive en el paquete
+// de métricas; así este paquete no depende de ninguna librería de observabilidad).
+type Observer interface {
+	// Batch se invoca por cada lote: cuántos comandos, cuánto tardó ejecutarlos y cuánto el fsync.
+	Batch(size int, exec, fsync time.Duration)
+	// QueueWait es el tiempo que un comando esperó en la cola antes de ejecutarse.
+	QueueWait(d time.Duration)
+}
+
 // command ejecuta la lógica sobre el exchange. Devuelve el registro a persistir (nil si no
 // cambió el estado: lecturas y operaciones rechazadas) y la función que responde al cliente.
 // La respuesta se entrega DESPUÉS del fsync del lote: nunca se confirma algo no durable.
@@ -37,6 +47,7 @@ type command func(*exchange.Exchange) (rec *journal.Record, reply func())
 type Sequencer struct {
 	ex   *exchange.Exchange
 	jr   *journal.Journal // nil = sin persistencia (tests)
+	obs  Observer         // nil = sin métricas
 	in   chan command
 	quit chan struct{}
 	done chan struct{}
@@ -52,6 +63,9 @@ type Option func(*Sequencer)
 // WithJournal activa la persistencia: cada comando que cambia estado se registra y se
 // confirma con group commit.
 func WithJournal(j *journal.Journal) Option { return func(s *Sequencer) { s.jr = j } }
+
+// WithObserver activa la emisión de mediciones internas.
+func WithObserver(o Observer) Option { return func(s *Sequencer) { s.obs = o } }
 
 // New crea el secuenciador y arranca su goroutine. queueSize es la capacidad de la cola.
 func New(ex *exchange.Exchange, queueSize int, opts ...Option) *Sequencer {
@@ -105,6 +119,7 @@ func (s *Sequencer) run() {
 // entonces responde a los clientes.
 func (s *Sequencer) processBatch(batch []command, replies *[]func()) {
 	*replies = (*replies)[:0]
+	t0 := time.Now()
 	for _, cmd := range batch {
 		rec, reply := cmd(s.ex)
 		if rec != nil && s.jr != nil {
@@ -116,10 +131,17 @@ func (s *Sequencer) processBatch(batch []command, replies *[]func()) {
 		}
 		*replies = append(*replies, reply)
 	}
+	tExec := time.Since(t0)
+	var tSync time.Duration
 	if s.jr != nil {
+		t1 := time.Now()
 		if err := s.jr.Sync(); err != nil {
 			panic(fmt.Sprintf("fsync del journal falló: %v", err))
 		}
+		tSync = time.Since(t1)
+	}
+	if s.obs != nil {
+		s.obs.Batch(len(batch), tExec, tSync)
 	}
 	for _, reply := range *replies {
 		reply()
@@ -137,6 +159,16 @@ func (s *Sequencer) Stop() {
 		close(s.quit)
 	}
 	<-s.done
+}
+
+// Stopped indica si el secuenciador dejó de aceptar comandos (apagado en curso).
+func (s *Sequencer) Stopped() bool {
+	select {
+	case <-s.quit:
+		return true
+	default:
+		return false
+	}
 }
 
 // QueueLen y QueueCap alimentan las métricas de saturación.
@@ -165,7 +197,11 @@ func Do[T any](ctx context.Context, s *Sequencer, fn func(*exchange.Exchange) (T
 		err error
 	}
 	ch := make(chan reply, 1) // con buffer: el secuenciador nunca se bloquea al responder
+	enqueued := time.Now()
 	cmd := func(x *exchange.Exchange) (*journal.Record, func()) {
+		if s.obs != nil {
+			s.obs.QueueWait(time.Since(enqueued))
+		}
 		v, rec, err := fn(x)
 		if err != nil {
 			rec = nil // lo rechazado no cambia el estado: no se registra
