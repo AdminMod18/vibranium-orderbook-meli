@@ -58,7 +58,11 @@ func main() {
 
 	// Recuperación: snapshot + cola del journal (o el journal completo si no hay snapshot utilizable).
 	journalPath := envStr("JOURNAL_PATH", "data/journal.log")
-	snapEvery := 200_000 // registros entre snapshots; SNAPSHOT_EVERY=0 los desactiva
+	// Registros entre snapshots; SNAPSHOT_EVERY=0 los desactiva. Cada snapshot FRENA al secuenciador mientras copia el
+	// estado (≈ 0,2 s por millón de órdenes en el libro) y esa pausa es lo que domina el p99 con estado grande: medido
+	// con 5.000/s, p99 = 12 ms sin snapshots, 101-342 ms cada 200.000 y 47 ms cada 1.000.000. El costo de espaciarlos es
+	// una cola de hasta ~1 M de registros que reproducir tras un crash (≈ 9 s). Ver docs/OPTIMIZACION.md.
+	snapEvery := 1_000_000
 	if v, err := strconv.Atoi(os.Getenv("SNAPSHOT_EVERY")); err == nil && v >= 0 {
 		snapEvery = v
 	}
@@ -154,6 +158,7 @@ func main() {
 			}
 			return 0
 		})
+		met.CounterFunc("projector_rescanned_records_total", "Registros ya reflejados que el proyector volvió a leer al arrancar (1 = reanudó por offset; ≈ todo el journal = tuvo que releerlo).", func() float64 { return float64(proj.Rescanned()) })
 		met.CounterFunc("projector_failures_total", "Errores del proyector (Postgres caído, etc.).", func() float64 { return float64(proj.Failures()) })
 		log.Info("historial en Postgres habilitado")
 	} else {

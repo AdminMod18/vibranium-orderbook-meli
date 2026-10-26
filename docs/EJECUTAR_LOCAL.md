@@ -89,6 +89,8 @@ Los drills de arriba usan Docker + `curl`. Este otro necesita **Go** instalado:
 ./scripts/drill-idempotency.sh         # ventana de idempotencia y reinicios con otra ventana
 ./scripts/drill-single-instance.sh     # un 2º proceso sobre el mismo journal se rechaza; --docker prueba un 2º contenedor
 ./scripts/test-alerts.sh               # pruebas unitarias de las reglas de alerta (usa Docker, no toca datos)
+./scripts/seed.sh                       # OPCIONAL: fondea billeteras (alice..erin con R$ 1.000.000 y 1.000 VIB); --count N, --brl, --vib; ver ./scripts/seed.sh -h
+./scripts/latency-breakdown.sh 10         # tras una carga: ¿dónde se va el tiempo? (cola, matching, fsync, HTTP); usa Prometheus
 ./scripts/soak.sh 20 5000              # RESISTENCIA: 20 min a 5.000/s; escribe varios GB (journal + Postgres ≈ 1 KB por orden); pide confirmación
 go test -race ./...                    # toda la batería de tests
 ```

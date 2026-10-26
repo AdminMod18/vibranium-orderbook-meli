@@ -24,6 +24,9 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:orderbook@postgres:5432/orderbook
       QUEUE_SIZE: "10000"      # ≈ ritmo × plazo de la request (2 s)
+      # Con la ventana por defecto (5 M ids) el soak midió heap máx. 2,7 GiB y RSS 3,7 GiB sin límite (L20).
+      # GOMEMLIMIT hace que el GC trabaje más ANTES de topar con el límite del contenedor (mem_limit) en vez de morir por OOM.
+      GOMEMLIMIT: ${GOMEMLIMIT:-3GiB}
       ADMIN_PORT: "9102"      # /metrics y pprof (puerto aparte de la API)
       LOG_LEVEL: info         # debug = una línea por request
     volumes: ["journal:/data"]   # el journal DEBE vivir en un volumen: es la fuente de verdad
@@ -35,6 +38,7 @@ services:
       interval: 5s
       timeout: 2s
       retries: 10
+    mem_limit: ${APP_MEM_LIMIT:-4g}   # tope duro; es un límite, no una reserva (no consume nada si no se usa)
     restart: unless-stopped
     stop_grace_period: 30s       # deja tiempo al apagado ordenado (vaciar cola y cerrar journal)
 

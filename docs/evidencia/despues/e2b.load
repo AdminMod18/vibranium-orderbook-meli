@@ -1,0 +1,14 @@
+ Container vibranium-orderbook-meli-orderbook-1 Running 
+ Container vibranium-orderbook-meli-postgres-1 Running 
+ Container vibranium-orderbook-meli-loadgen-run-b9c28b36100a Creating 
+ Container vibranium-orderbook-meli-loadgen-run-b9c28b36100a Created 
+Sembrando 100 usuarios... ok
+Carga: objetivo=5000 órd/s, 128 workers, 1m15s...
+
+=== Resultado ===
+órdenes completadas : 375001 en 1m15.001s  =>  5000 órdenes/s efectivas
+latencia            : p50=1.93ms  p90=8.966ms  p99=583.507ms  p99.9=887.051ms  max=948.522ms
+respuestas          :  201×375001
+cancelaciones       : 11801 (ya ejecutadas/no encontradas: 3407)
+auditoría de saldos : {"error":"","ok":true,"total_brl":700000600015000,"total_vib":700000006006}
+OK

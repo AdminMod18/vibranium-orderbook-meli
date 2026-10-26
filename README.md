@@ -68,6 +68,8 @@ Fases 1-6 completas: motor de matching, billeteras con reserva de fondos, API + 
 ./scripts/drill-idempotency.sh     # ventana de idempotencia: reciente=409, antiguo=nuevo, reinicio con otra ventana
 ./scripts/drill-single-instance.sh # una sola instancia por journal: el 2º proceso/contenedor se rechaza
 ./scripts/test-alerts.sh           # pruebas unitarias de las 13 reglas de alerta (promtool, vía Docker)
+./scripts/seed.sh                   # (opcional) fondea alice/bob/carol/dave/erin; --count 100, --brl, --vib; o a mano con POST /deposits
+./scripts/latency-breakdown.sh 10      # descompone la latencia por etapa (cola · matching · fsync · HTTP) con los histogramas de Prometheus
 ./scripts/soak.sh 20 5000          # prueba de resistencia: 20 min a 5.000/s con muestreo de memoria, snapshots, disco y reinicio final
 ./scripts/drill-kill9.sh          # carga concurrente -> kill -9 -> reinicio -> verifica saldos
 ./scripts/drill-postgres-down.sh   # Postgres cae en pleno uso: el matching sigue y el historial se reconcilia
@@ -85,5 +87,6 @@ El estado se guarda en `data/journal.log` (`JOURNAL_PATH`).
 - [docs/MEJORAS.md](docs/MEJORAS.md) — backlog de arquitectura: preguntas probables y siguiente paso.
 - [docs/OBSERVABILIDAD.md](docs/OBSERVABILIDAD.md) — métricas, alertas, dashboard, resultados medidos y runbook.
 - [docs/INFORME_PRUEBAS.md](docs/INFORME_PRUEBAS.md) — qué se probó, resultados medidos, hallazgos y limitaciones.
+- [docs/OPTIMIZACION.md](docs/OPTIMIZACION.md) — fase de optimización: diagnóstico de la latencia, hipótesis verificadas y rechazadas, cambios y resultados antes/después.
 - [docs/PRESENTACION.md](docs/PRESENTACION.md) — guion de la presentación, mensajes clave y preguntas probables.
 - [docs/EJECUTAR_LOCAL.md](docs/EJECUTAR_LOCAL.md) — cómo correrlo en tu máquina.

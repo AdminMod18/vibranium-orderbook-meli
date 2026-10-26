@@ -42,6 +42,7 @@ docker compose run --rm loadgen -rate 5000 -duration 30s
 | `orderbook_batch_exec_seconds` | ¿Cuánto cuesta el matching en memoria? (casi nada) |
 | `orderbook_journal_last_seq`, `journal_bytes`, `journal_syncs_total` | Ritmo y tamaño del journal |
 | `orderbook_projector_lag`, `projector_up`, `projector_failures_total` | ¿El historial está al día? ¿Postgres está bien? |
+| `orderbook_projector_rescanned_records_total` | Al arrancar: 1 = el proyector reanudó por offset; ≈ todo el journal = tuvo que releerlo (offset inservible o historial antiguo) |
 | `orderbook_snapshot_age_records` / `snapshot_pause_seconds` / `snapshot_write_seconds` / `snapshot_failures_total` | ¿Cuánto habría que reproducir en un reinicio? ¿Cuánto frena el snapshot al secuenciador? |
 | `orderbook_recovery_seconds` / `recovery_replayed_records` | ¿Cuánto tardó el último arranque y qué reprodujo? |
 | `orderbook_queue_expired_total` | ¿Se descartan comandos porque el cliente ya no esperaba? (latencia > plazo) |

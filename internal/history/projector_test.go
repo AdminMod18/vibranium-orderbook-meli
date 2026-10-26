@@ -206,6 +206,9 @@ func TestProjectorMirrorsEngineAndSurvivesRestart(t *testing.T) {
 	go p2.Run(ctx)
 	waitProjected(t, p2, j)
 	verify(t, st, ex, tr, users) // sin duplicados ni faltantes tras retomar desde last_seq
+	if p2.Rescanned() != 1 {     // solo el último registro ya proyectado, para comprobar que el journal lo contiene
+		t.Fatalf("al reanudar desde el offset guardado solo debe re-leer 1 registro ya reflejado, pero re-leyó %d", p2.Rescanned())
+	}
 
 	s.Stop()
 	t.Logf("registros en journal=%d trades=%d", j.NextSeq()-1, tr.trades)
@@ -324,5 +327,151 @@ func TestProjectorStopsWhenPostgresIsAheadOfTheJournal(t *testing.T) {
 	}
 	if after, _ := st.LastSeq(ctx); after != projected {
 		t.Fatalf("no debe tocar el historial: last_seq %d -> %d", projected, after)
+	}
+}
+
+// Si el offset guardado no sirve (historial creado antes de la columna, o un offset que no cae en el borde de un
+// registro, o que apunta a otro registro) el proyector NO debe confiar en él ni saltar nada: lee desde el inicio,
+// que siempre fue correcto, y el resultado es idéntico al de una reanudación normal.
+func TestProjectorResumeFallsBackToFullScanWhenOffsetIsUnusable(t *testing.T) {
+	for name, breakOffset := range map[string]string{
+		"offset 0 (historial anterior a la columna)": `UPDATE projector_state SET journal_offset = 0`,
+		"offset en mitad de un registro":             `UPDATE projector_state SET journal_offset = journal_offset - 3`,
+		"offset de un registro anterior":             `UPDATE projector_state SET journal_offset = journal_offset - 1`, // se ajusta abajo
+		"offset más allá del final del journal":      `UPDATE projector_state SET journal_offset = journal_offset + 1000000`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := openStore(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+			path := filepath.Join(t.TempDir(), "journal.log")
+			j, _, err := journal.Recover(path, journal.Options{}, func(journal.Record) error { return nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			ex := exchange.New()
+			s := sequencer.New(ex, 100_000, sequencer.WithJournal(j))
+			const users = 10
+			for i := 0; i < users; i++ {
+				if err := s.Deposit(ctx, fmt.Sprintf("u%d", i), 400_000, 800); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tr := newTruth()
+			runLoad(t, s, tr, "a", 10, 60, users)
+
+			p1ctx, stop1 := context.WithCancel(ctx)
+			done1 := make(chan struct{})
+			p1 := history.NewProjector(st, path, log)
+			p1.SetDurable(j.DurableBytes)
+			go func() { p1.Run(p1ctx); close(done1) }()
+			waitProjected(t, p1, j)
+			stop1()
+			<-done1
+
+			if strings.Contains(name, "anterior") {
+				// un offset válido pero del registro ANTERIOR: la continuidad de secuencia lo delata
+				breakOffset = fmt.Sprintf(`UPDATE projector_state SET journal_offset = %d`, previousRecordOffset(t, path, st))
+			}
+			if _, err := st.Exec(ctx, breakOffset); err != nil {
+				t.Fatal(err)
+			}
+			runLoad(t, s, tr, "b", 10, 60, users)
+
+			p2 := history.NewProjector(st, path, log)
+			p2.SetDurable(j.DurableBytes)
+			go p2.Run(ctx)
+			waitProjected(t, p2, j)
+			verify(t, st, ex, tr, users)
+			if p2.Rescanned() <= 1 {
+				t.Fatalf("con un offset inservible debía releer desde el inicio, pero solo releyó %d", p2.Rescanned())
+			}
+			s.Stop()
+		})
+	}
+}
+
+// recordStart devuelve el byte donde empieza el registro número seq del journal.
+func recordStart(t *testing.T, path string, seq uint64) int64 {
+	t.Helper()
+	rd, err := journal.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rd.Close()
+	if _, err := rd.ReadNew(int(seq-1), func(journal.Record) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	return rd.Offset() // fin del registro seq-1 = inicio del registro seq
+}
+
+// previousRecordOffset: inicio del registro ANTERIOR al último proyectado (el guardado es el del último).
+func previousRecordOffset(t *testing.T, path string, st *history.Store) int64 {
+	t.Helper()
+	seq, _, err := st.Position(context.Background())
+	if err != nil || seq < 3 {
+		t.Fatalf("posición: seq=%d err=%v", seq, err)
+	}
+	return recordStart(t, path, seq-1)
+}
+
+// El caso PELIGROSO de un offset guardado: que apunte a un registro POSTERIOR a `last`. Si el lector se fiara
+// de él, saltaría registros en silencio y el historial quedaría incompleto. La comprobación de continuidad
+// de la primera lectura (offset a mitad de la parte nueva) y la exigencia de releer el registro `last` (offset
+// en el final del journal, que no contradice nada pero tampoco prueba nada) lo detectan y fuerzan releer todo.
+func TestProjectorResumeNeverSkipsRecordsEvenWithAnOffsetAhead(t *testing.T) {
+	for name, pick := range map[string]func(t *testing.T, path string, last uint64, j *journal.Journal) int64{
+		"a mitad de la parte nueva": func(t *testing.T, path string, last uint64, _ *journal.Journal) int64 {
+			return recordStart(t, path, last+5)
+		},
+		"en el final del journal": func(_ *testing.T, _ string, _ uint64, j *journal.Journal) int64 { return j.DurableBytes() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := openStore(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+			path := filepath.Join(t.TempDir(), "journal.log")
+			j, _, err := journal.Recover(path, journal.Options{}, func(journal.Record) error { return nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			ex := exchange.New()
+			s := sequencer.New(ex, 100_000, sequencer.WithJournal(j))
+			const users = 10
+			for i := 0; i < users; i++ {
+				if err := s.Deposit(ctx, fmt.Sprintf("u%d", i), 400_000, 800); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tr := newTruth()
+			runLoad(t, s, tr, "a", 10, 60, users)
+			p1ctx, stop1 := context.WithCancel(ctx)
+			done1 := make(chan struct{})
+			p1 := history.NewProjector(st, path, log)
+			p1.SetDurable(j.DurableBytes)
+			go func() { p1.Run(p1ctx); close(done1) }()
+			waitProjected(t, p1, j)
+			stop1()
+			<-done1
+
+			runLoad(t, s, tr, "b", 10, 60, users) // registros que el historial aún no tiene
+			last, _, _ := st.Position(ctx)
+			if _, err := st.Exec(ctx, fmt.Sprintf(`UPDATE projector_state SET journal_offset = %d`, pick(t, path, last, j))); err != nil {
+				t.Fatal(err)
+			}
+			p2 := history.NewProjector(st, path, log)
+			p2.SetDurable(j.DurableBytes)
+			go p2.Run(ctx)
+			waitProjected(t, p2, j)
+			verify(t, st, ex, tr, users) // si hubiera saltado registros, órdenes/trades/saldos no cuadrarían
+			if p2.Rescanned() < last {
+				t.Fatalf("con un offset adelantado debía releer desde el inicio: releyó %d de %d ya proyectados", p2.Rescanned(), last)
+			}
+			s.Stop()
+		})
 	}
 }

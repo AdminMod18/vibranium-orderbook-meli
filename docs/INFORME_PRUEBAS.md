@@ -7,7 +7,7 @@
 
 | Capa | Qué demuestra | Cómo se ejecuta |
 |---|---|---|
-| **68 tests de Go** con el detector de carreras (`-race`) | Reglas del libro (precio-tiempo, parciales, precio del maker), reservas, saldos, idempotencia, concurrencia (100 goroutines), journal (cola truncada, CRC, corrupción real), recuperación, snapshots, API y métricas | `go test -race ./...` |
+| **77 tests de Go** con el detector de carreras (`-race`) | Reglas del libro (precio-tiempo, parciales, precio del maker), reservas, saldos, idempotencia, concurrencia (100 goroutines), journal (cola truncada, CRC, corrupción real), recuperación, snapshots, API y métricas | `go test -race ./...` |
 | **Pruebas aleatorias de invariantes** | 20.000 órdenes con cancelaciones: el libro nunca queda cruzado, se conserva el valor, cada trade respeta los límites de precio | dentro de `go test` |
 | **Integración con Postgres real** | El historial reproduce al motor; el saldo recalculado desde depósitos+trades == billetera; reinicio del proyector sin duplicados; Postgres caído; journal ajeno rechazado | `TEST_DATABASE_URL=… go test ./internal/history` |
 | **Matriz de recuperación** | Caída sin apagado ordenado, apagado ordenado, reinicios encadenados y 6 snapshots inservibles (corrupto, truncado, de otro journal, offset inválido, offset fuera de rango, estado inconsistente): **todos llegan al mismo estado** | `go test ./internal/recovery` |
@@ -59,6 +59,10 @@ Entorno: **máquina de 4 núcleos compartida** entre generador, app, Postgres, P
 - **La memoria no es solo la ventana.** El perfil del heap tras el último reinicio muestra 712 MiB vivos: 305 MiB de la ventana de idempotencia (5 M ids), ≈ 232 MiB del libro restaurado y 172 MiB de basura de la decodificación del snapshot. El pico de 2,7 GiB/RSS 3,7 GiB es la suma de GC (hasta 2× lo vivo) y la copia del estado al hacer el snapshot. **Hay que dimensionar el contenedor a ≥ 4 GiB con la ventana por defecto** o bajar `IDEMPOTENCY_WINDOW`; hoy `docker-compose.yml` no pone límite de memoria ni `GOMEMLIMIT` (L20).
 - **Se corrió con Postgres detenido** durante la corrida 1 (para no agotar el disco del sandbox), así que no mide el costo conjunto; en la corrida 2 el proyector se puso al día solo. Entorno compartido de 4 núcleos y disco virtual (fsync casi instantáneo): las cifras no son de producción.
 
+## 2c. Fase de optimización
+
+Diagnóstico, hipótesis verificadas/rechazadas, cambios y comparación antes/después: **[OPTIMIZACION.md](OPTIMIZACION.md)** (registros crudos en `evidencia/`). Lo esencial: el p90 de 24,6 s del soak era un transitorio causado por el re-escaneo del journal por el proyector al arrancar (corregido); con el sistema caliente la cola de latencia la domina la pausa del snapshot (p99 12 ms sin snapshots vs 101-342 ms cada 200.000; 47 ms cada 1.000.000).
+
 ## 3. Resiliencia
 
 | Drill | Qué se rompe | Qué se verifica | Resultado |
@@ -101,12 +105,18 @@ Cada ítem es un defecto o una creencia errónea que **una prueba descubrió** y
 19. **Sin señal de disco lleno** (el journal crece ≈ 110 MiB/min a 5.000/s y no había alerta). *Corregido (D70):* gauge `journal_disk_free_bytes`, alertas `JournalDiskLow` y `JournalDiskFillingUp`, y **26 pruebas unitarias con `promtool` de las 13 reglas** (`./scripts/test-alerts.sh`; cambiar un umbral hace fallar alguna).
 20. **El generador de carga contaba "órdenes descartadas" mal** (el contador sumaba vueltas de un bucle de espera: 1.070.095.419 en la corrida 2, un número imposible). Lo detectó la propia prueba de resistencia. *Corregido:* envío bloqueante; si el sistema no sostiene el ritmo se informa "terminó N s después de lo previsto" y la latencia ya lo refleja.
 
+21. **El proyector releía todo el journal en cada arranque** (decodificaba 7,5 M registros para descartarlos: ≈ 60 s, 2-3 núcleos, 58 errores 504 y p99 2,45 s en un reinicio bajo carga). *Corregido:* reanuda por offset y verifica el journal con 1 registro (D72). Mutaciones: sin continuidad o sin exigir releer el registro `last`, los tests fallan.
+22. **`ReadNew` reservaba un buffer de 1 MiB por llamada** (49 % de toda la basura del servidor) y **`snapshot.Write` reservaba 4,4× el archivo** (932 MiB por 210 MiB). *Corregido* (D73, D74): −68 % de basura, ciclos de GC 16,9 → 4,6 por minuto.
+23. **Cada snapshot pausa al secuenciador** (150-230 ms por millón de órdenes en el libro): domina el p99. *Mitigado* espaciándolos (D75); la corrección de fondo queda como decisión (L21).
+24. **Sin espacio en disco el servidor hace fail-stop** (`panic: fsync del journal falló: no space left on device`), se reinicia y no pierde lo confirmado: ocurrió de verdad durante las pruebas y el diseño se comportó como estaba previsto. La alerta `JournalDiskLow` existe para evitarlo.
+
 ## 5. Limitaciones (lo que NO se probó o no es válido)
 
 - **Windows/Git Bash y Docker Desktop no se pudieron probar** (el desarrollo se hizo en Linux). Los scripts contemplan `.exe`, CRLF y PIDs ajenos, pero requieren que se ejecute `./scripts/preflight.sh` allí.
 - ~~El `Dockerfile` completo no se ejecutó de punta a punta en el entorno de desarrollo~~ → **verificado en una máquina Windows con Docker Desktop**: el build completo termina bien. (En el entorno de desarrollo se probó por partes.)
 - **Un solo disco y sin réplica en espera** (L3, L6): un fallo del disco pierde el journal. La doble instancia ya se impide (D67), pero eso no es alta disponibilidad.
 - **El journal crece sin rotación** (L13 en `DECISIONES.md`): ≈150 GB/día a 5.000/s. La memoria de idempotencia sí está acotada (D57).
+- **No se hizo la prueba de ≥ 30 min ni en disco real** (OPTIMIZACION.md §7): el entorno solo tiene disco virtual y espacio para ≈ 10 min con Postgres.
 - **La ventana de idempotencia SÍ se llevó a 5 M ids reales de punta a punta** (§2b), pero solo 12 min con el estado lleno y en disco virtual; una prueba de ≥ 30 min en disco real sigue pendiente.
 - Cifras de rendimiento medidas en entorno compartido y con disco virtual (L10).
 

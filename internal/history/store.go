@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS projector_state (
 	last_seq bigint NOT NULL
 );
 ALTER TABLE projector_state ADD COLUMN IF NOT EXISTS journal_id text;
+-- Byte del journal donde EMPIEZA el registro last_seq: permite reanudar sin re-leer todo el journal
+-- (0 = desconocido, p. ej. historial creado antes de esta columna: se lee desde el inicio).
+ALTER TABLE projector_state ADD COLUMN IF NOT EXISTS journal_offset bigint NOT NULL DEFAULT 0;
 INSERT INTO projector_state (id, last_seq) VALUES (1, 0) ON CONFLICT DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS orders (
@@ -116,6 +119,14 @@ func (s *Store) LastSeq(ctx context.Context) (uint64, error) {
 	var n int64
 	err := s.pool.QueryRow(ctx, `SELECT last_seq FROM projector_state WHERE id = 1`).Scan(&n)
 	return uint64(n), err
+}
+
+// Position devuelve hasta qué registro está reflejado el historial y en qué byte del journal empieza ese
+// último registro (0 si no se conoce).
+func (s *Store) Position(ctx context.Context) (seq uint64, offset int64, err error) {
+	var n int64
+	err = s.pool.QueryRow(ctx, `SELECT last_seq, journal_offset FROM projector_state WHERE id = 1`).Scan(&n, &offset)
+	return uint64(n), offset, err
 }
 
 // --- modelos de lectura (con tags JSON: se devuelven tal cual por la API) ---

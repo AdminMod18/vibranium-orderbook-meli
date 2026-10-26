@@ -173,7 +173,7 @@ func recoverLocked(path string, opts Options, resume *Resume, fn func(Record) er
 			return nil, ReplayStats{}, fmt.Errorf("%w: el snapshot apunta más allá del final del journal", ErrCorrupt)
 		}
 	}
-	res, err := scan(f, start, 0, prev, 0, fn)
+	res, err := scan(f, start, 0, prev, 0, fn, nil)
 	if err != nil {
 		f.Close()
 		return nil, ReplayStats{}, err
@@ -311,16 +311,17 @@ func (j *Journal) DurableBytes() int64 { return j.durable.Load() }
 // --- lectura ---
 
 type scanResult struct {
-	end     int64  // offset del final del último registro válido
-	lastSeq uint64 // seq del último registro válido
-	count   int
+	end       int64  // offset del final del último registro válido
+	lastSeq   uint64 // seq del último registro válido
+	lastStart int64  // offset donde empieza el último registro válido (-1 si no hubo)
+	count     int
 }
 
 // scan lee registros desde start. prevSeq es el seq esperado previo (0 = no verificar el primero).
 // limit > 0 corta tras ese número de registros (lectura por lotes). end > 0 acota la lectura a ese offset.
 // Una cola incompleta (EOF a mitad de registro, o CRC malo en el ÚLTIMO registro) se tolera:
 // es el rastro de una caída durante la escritura. Cualquier otra anomalía es corrupción real.
-func scan(f *os.File, start, end int64, prevSeq uint64, limit int, fn func(Record) error) (scanResult, error) {
+func scan(f *os.File, start, end int64, prevSeq uint64, limit int, fn func(Record) error, buf *scanBuf) (scanResult, error) {
 	if end <= 0 { // 0 = hasta el final actual del archivo
 		fi, err := f.Stat()
 		if err != nil {
@@ -328,11 +329,14 @@ func scan(f *os.File, start, end int64, prevSeq uint64, limit int, fn func(Recor
 		}
 		end = fi.Size()
 	}
-	res := scanResult{end: start, lastSeq: prevSeq}
+	res := scanResult{end: start, lastSeq: prevSeq, lastStart: -1}
 	if end <= start {
 		return res, nil
 	}
-	r := bufio.NewReaderSize(io.NewSectionReader(f, start, end-start), 1<<20)
+	if buf == nil {
+		buf = &scanBuf{}
+	}
+	r := buf.reader(io.NewSectionReader(f, start, end-start))
 	for limit <= 0 || res.count < limit {
 		var hdr [headerSize]byte
 		if _, err := io.ReadFull(r, hdr[:]); err != nil {
@@ -346,7 +350,7 @@ func scan(f *os.File, start, end int64, prevSeq uint64, limit int, fn func(Recor
 		if n == 0 || n > maxRecordSize {
 			return res, fmt.Errorf("%w: longitud inválida %d en offset %d", ErrCorrupt, n, res.end)
 		}
-		payload := make([]byte, n)
+		payload := buf.payload(int(n))
 		if _, err := io.ReadFull(r, payload); err != nil {
 			if err == io.ErrUnexpectedEOF || err == io.EOF {
 				return res, nil // payload cortado: cola truncada
@@ -369,6 +373,7 @@ func scan(f *os.File, start, end int64, prevSeq uint64, limit int, fn func(Recor
 		if err := fn(rec); err != nil {
 			return res, err
 		}
+		res.lastStart = res.end
 		res.end += int64(headerSize) + int64(n)
 		res.lastSeq = rec.Seq
 		res.count++
@@ -376,12 +381,40 @@ func scan(f *os.File, start, end int64, prevSeq uint64, limit int, fn func(Recor
 	return res, nil
 }
 
+// scanBuf son los buffers de lectura que un lector de larga vida reutiliza entre llamadas. Sin ellos cada
+// ReadNew (el proyector llama varias veces por segundo) reservaba un bufio de 1 MiB nuevo: medido, el 49 % de
+// TODA la basura que generaba el servidor a 5.000 órdenes/s, y de ahí venían ~20 ciclos de GC por minuto.
+type scanBuf struct {
+	br  *bufio.Reader
+	buf []byte
+}
+
+func (b *scanBuf) reader(src io.Reader) *bufio.Reader {
+	if b.br == nil {
+		b.br = bufio.NewReaderSize(src, 1<<20)
+	} else {
+		b.br.Reset(src)
+	}
+	return b.br
+}
+
+// payload devuelve un buffer de n bytes. Es seguro reutilizarlo: json.Unmarshal copia las cadenas y
+// Record no guarda referencias al buffer.
+func (b *scanBuf) payload(n int) []byte {
+	if cap(b.buf) < n {
+		b.buf = make([]byte, n, max(n, 4096))
+	}
+	return b.buf[:n]
+}
+
 // Reader lee el log de forma incremental sin escribir: lo usará el proyector del historial.
 type Reader struct {
-	f       *os.File
-	offset  int64
-	lastSeq uint64
-	durable func() int64 // si no es nil, no se lee más allá de este offset
+	f         *os.File
+	offset    int64
+	lastSeq   uint64
+	lastStart int64        // donde empieza el último registro leído (-1 si aún no se leyó ninguno)
+	durable   func() int64 // si no es nil, no se lee más allá de este offset
+	buf       scanBuf
 }
 
 // SetDurable limita la lectura al offset que devuelva fn (p. ej. Journal.DurableBytes): el lector solo
@@ -393,24 +426,57 @@ func OpenReader(path string) (*Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Reader{f: f}, nil
+	return &Reader{f: f, lastStart: -1}, nil
+}
+
+// ErrBehind indica que el journal es más corto que el offset desde el que se pidió leer: el archivo
+// retrocedió o es otro. Quien reanuda desde un offset guardado debe volver a leer desde el inicio.
+var ErrBehind = errors.New("el journal es más corto que el offset de reanudación")
+
+// OpenReaderAt abre el lector reanudando en offset, que debe ser el byte donde empieza el registro
+// afterSeq+1. No se confía en el offset: la primera lectura comprueba que el registro que hay ahí
+// sea exactamente afterSeq+1 (si no, falla con ErrCorrupt) y que el archivo llegue hasta ese punto
+// (si no, ErrBehind). Quien lo use debe exigir además que esa primera lectura devuelva al menos un
+// registro: un offset en el final del archivo no contradice nada pero tampoco prueba nada.
+func OpenReaderAt(path string, offset int64, afterSeq uint64) (*Reader, error) {
+	r, err := OpenReader(path)
+	if err != nil {
+		return nil, err
+	}
+	r.offset, r.lastSeq = offset, afterSeq
+	return r, nil
 }
 
 // ReadNew entrega a fn hasta limit registros (0 = todos) agregados desde la última llamada.
 func (r *Reader) ReadNew(limit int, fn func(Record) error) (int, error) {
 	var end int64
 	if r.durable != nil {
-		if end = r.durable(); end <= r.offset {
+		if end = r.durable(); end < r.offset {
+			return 0, ErrBehind
+		} else if end == r.offset {
 			return 0, nil // aún no hay nada nuevo que esté en disco
 		}
+	} else if fi, err := r.f.Stat(); err == nil && fi.Size() < r.offset {
+		return 0, ErrBehind
 	}
-	res, err := scan(r.f, r.offset, end, r.lastSeq, limit, fn)
+	res, err := scan(r.f, r.offset, end, r.lastSeq, limit, fn, &r.buf)
 	if err != nil {
 		return res.count, err
 	}
 	r.offset, r.lastSeq = res.end, res.lastSeq
+	if res.lastStart >= 0 {
+		r.lastStart = res.lastStart
+	}
 	return res.count, nil
 }
+
+// Offset es el byte donde empezará la próxima lectura (justo después del último registro leído).
+func (r *Reader) Offset() int64 { return r.offset }
+
+// LastRecordStart es el byte donde EMPIEZA el último registro leído (-1 si no se leyó ninguno). Guardarlo
+// permite reanudar volviendo a leer ese registro: así la reanudación siempre comprueba que el journal
+// contiene de verdad lo que el historial dice haber proyectado.
+func (r *Reader) LastRecordStart() int64 { return r.lastStart }
 
 func (r *Reader) Close() error { return r.f.Close() }
 
