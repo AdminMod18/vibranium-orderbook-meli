@@ -7,7 +7,7 @@
 
 | Capa | Qué demuestra | Cómo se ejecuta |
 |---|---|---|
-| **77 tests de Go** con el detector de carreras (`-race`) | Reglas del libro (precio-tiempo, parciales, precio del maker), reservas, saldos, idempotencia, concurrencia (100 goroutines), journal (cola truncada, CRC, corrupción real), recuperación, snapshots, API y métricas | `go test -race ./...` |
+| **79 tests de Go** con el detector de carreras (`-race`) | Reglas del libro (precio-tiempo, parciales, precio del maker), reservas, saldos, idempotencia, concurrencia (100 goroutines), journal (cola truncada, CRC, corrupción real), recuperación, snapshots, API y métricas | `go test -race ./...` |
 | **Pruebas aleatorias de invariantes** | 20.000 órdenes con cancelaciones: el libro nunca queda cruzado, se conserva el valor, cada trade respeta los límites de precio | dentro de `go test` |
 | **Integración con Postgres real** | El historial reproduce al motor; el saldo recalculado desde depósitos+trades == billetera; reinicio del proyector sin duplicados; Postgres caído; journal ajeno rechazado | `TEST_DATABASE_URL=… go test ./internal/history` |
 | **Matriz de recuperación** | Caída sin apagado ordenado, apagado ordenado, reinicios encadenados y 6 snapshots inservibles (corrupto, truncado, de otro journal, offset inválido, offset fuera de rango, estado inconsistente): **todos llegan al mismo estado** | `go test ./internal/recovery` |
@@ -61,7 +61,7 @@ Entorno: **máquina de 4 núcleos compartida** entre generador, app, Postgres, P
 
 ## 2d. Pruebas con Apache JMeter
 
-Planes reproducibles en [`jmeter/`](../jmeter/README.md): **integridad financiera** (24-25 pasos con importes exactos), **carga** (gradual, sostenida, estrés; validación de negocio de cada respuesta y conservación de valor al final) y **recuperación tras `kill -9`**. El informe visual con las corridas y la correlación con el motor está en [`jmeter/report/index.html`](../jmeter/report/index.html) y los resultados en `jmeter/results/`. Las cifras y sus límites, en [DEFENSA_TECNICA.md](DEFENSA_TECNICA.md) §6-§7.
+Planes reproducibles en [`jmeter/`](../jmeter/README.md): **integridad financiera** (25 pasos con importes exactos; 27 con `WITH_HISTORY=true`), **carga** (gradual, sostenida, estrés; validación de negocio de cada respuesta y conservación de valor al final) y **recuperación tras `kill -9`**. El informe visual con las corridas y la correlación con el motor está en [`jmeter/report/index.html`](../jmeter/report/index.html) y los resultados en `jmeter/results/`. Las cifras y sus límites, en [DEFENSA_TECNICA.md](DEFENSA_TECNICA.md) §6-§7.
 
 ## 2c. Fase de optimización
 

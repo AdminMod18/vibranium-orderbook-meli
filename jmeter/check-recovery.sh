@@ -23,10 +23,14 @@ BEFORE=$(snap); echo "$BEFORE" | head -1
 echo "$BEFORE" | head -1 | grep -q '"ok":true' && ok "auditoría ok antes de la caída" || bad "auditoría no ok antes de la caída"
 
 echo ">> 3) SIGKILL a la app y reinicio"
+CID=$($COMPOSE ps -q orderbook); STARTED0=$(docker inspect -f '{{.State.StartedAt}}' "$CID" 2>/dev/null)
 $COMPOSE kill -s SIGKILL orderbook >/dev/null 2>&1 || { echo "no pude matar la app (¿docker compose up -d?)"; exit 1; }
 sleep 1; $COMPOSE up -d orderbook >/dev/null 2>&1
-t0=$(date +%s); until curl -sf "$A/readyz" >/dev/null; do sleep 0.5; [ $(( $(date +%s) - t0 )) -gt 120 ] && { echo "la app no volvió en 120 s"; exit 1; }; done
-echo "   volvió en $(( $(date +%s) - t0 )) s"
+t0=$(date +%s.%N); until curl -sf "$A/readyz" >/dev/null; do sleep 0.2; [ "$(echo "$(date +%s.%N) - $t0 > 120" | bc)" = 1 ] && { echo "la app no volvió en 120 s"; exit 1; }; done
+echo "   volvió en $(echo "$(date +%s.%N) - $t0" | bc | cut -c1-5) s (contado desde el reinicio, sin el segundo de espera tras el SIGKILL)"
+CID=$($COMPOSE ps -q orderbook); STARTED1=$(docker inspect -f '{{.State.StartedAt}}' "$CID" 2>/dev/null)
+[ -n "$STARTED0" ] && [ "$STARTED0" != "$STARTED1" ] && ok "el proceso se reinició de verdad (StartedAt cambió: $STARTED0 -> $STARTED1)" || bad "el contenedor NO se reinició (StartedAt no cambió)"
+docker logs "$CID" 2>&1 | grep "recuperación completa" | tail -1 | cut -c1-260 | sed 's/^/   /'
 
 echo ">> 4) comparación"
 AFTER=$(snap); echo "$AFTER" | head -1

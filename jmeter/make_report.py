@@ -290,6 +290,43 @@ def bar_chart(title, cats, series, unit="ms", w=900, h=260, log=False):
     return "".join(o)
 
 
+def hbar_chart(title, rows, series_labels, unit="ms", log=False, w=900, vmax=None):
+    """Barras horizontales agrupadas: una fila por corrida y una barra por serie (p50, p95, ...). rows = [(etiqueta, [valores])]."""
+    vals = [v for _, vs in rows for v in vs if v is not None and v > 0]
+    if not vals:
+        return f'<div class="nodata"><b>{html.escape(title)}</b><br>sin datos</div>'
+    n = len(series_labels)
+    rh = 14 * n + 10
+    ml, mr, mt, mb = 250, 56, 52, 24
+    h = mt + mb + rh * len(rows)
+    if log:
+        lo = 10 ** math.floor(math.log10(min(vals))); hi = 10 ** math.ceil(math.log10(max(vals)))
+        X = lambda v: ml + (math.log10(max(v, lo)) - math.log10(lo)) / max(math.log10(hi) - math.log10(lo), 1e-9) * (w - ml - mr)
+        ticks = [10 ** k for k in range(int(math.log10(lo)), int(math.log10(hi)) + 1)]
+    else:
+        lo, hi = 0, (vmax or max(vals)) * 1.08
+        X = lambda v: ml + v / hi * (w - ml - mr)
+        ticks = [t for t in nice_ticks(lo, hi) if t <= hi * 1.001]
+    o = [f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="{html.escape(title)}" class="chart"><text x="14" y="18" class="ct">{html.escape(title)}</text>']
+    lx = 14
+    for i, lab in enumerate(series_labels):
+        o.append(f'<rect x="{lx}" y="28" width="12" height="9" fill="{PALETTE[i % len(PALETTE)]}"/><text x="{lx+16}" y="37" class="tick">{html.escape(lab)}</text>')
+        lx += 16 + 7 * len(lab) + 16
+    for t in ticks:
+        o.append(f'<line x1="{X(t):.1f}" x2="{X(t):.1f}" y1="{mt}" y2="{h-mb}" class="grid"/><text x="{X(t):.1f}" y="{h-8}" class="tick" text-anchor="middle">{fmt(t)}</text>')
+    for r, (lab, vs) in enumerate(rows):
+        y0 = mt + r * rh
+        o.append(f'<text x="{ml-8}" y="{y0 + rh/2 + 3:.1f}" class="tick" text-anchor="end">{html.escape(lab)}</text>')
+        for i, v in enumerate(vs):
+            if v is None or v <= 0:
+                continue
+            yy = y0 + 4 + i * 14
+            o.append(f'<rect x="{ml}" y="{yy}" width="{max(X(v)-ml, 1):.1f}" height="11" fill="{PALETTE[i % len(PALETTE)]}"><title>{html.escape(lab)} · {series_labels[i]}: {v:g} {unit}</title></rect>'
+                     f'<text x="{X(v)+4:.1f}" y="{yy+9}" class="tick">{(f"{v:,.0f}" if v >= 100 else f"{v:.3g}")}</text>')
+    o.append(f'<line x1="{ml}" x2="{ml}" y1="{mt}" y2="{h-mb}" class="axis"/></svg>')
+    return "".join(o)
+
+
 def hist_chart(title, rows, w=900, h=230):
     """rows = [(hasta_ms, n)]"""
     tot = sum(n for _, n in rows)
@@ -323,6 +360,7 @@ CSS = """
 main{max-width:1000px;margin:0 auto;padding:24px 16px 80px}h1{font-size:26px;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px;border-bottom:1px solid var(--bd);padding-bottom:6px}h3{font-size:16px;margin:22px 0 6px}
 .sub{color:var(--mut);margin:0 0 16px}.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;margin:12px 0}
 table{border-collapse:collapse;width:100%;font-size:13.5px;display:block;overflow-x:auto}th,td{border-bottom:1px solid var(--bd);padding:6px 10px;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}th{color:var(--mut);font-weight:600}
+table.kv{display:table}table.kv td:last-child{text-align:left;white-space:normal;word-break:break-word}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:10px 0}.kpi{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:10px 12px}.kpi b{display:block;font-size:22px}.kpi span{color:var(--mut);font-size:12.5px}
 .chart{width:100%;height:auto;background:var(--card);border:1px solid var(--bd);border-radius:10px;margin:8px 0}.chart text{fill:var(--fg);font:11px system-ui,sans-serif}.chart .ct{font-weight:600;font-size:13px}.chart .tick{fill:var(--mut)}
 .chart .grid{stroke:var(--grid);stroke-width:1}.chart .axis{stroke:var(--mut);stroke-width:1}.nodata{border:1px dashed var(--bd);border-radius:10px;padding:18px;color:var(--mut);margin:8px 0}
@@ -392,7 +430,7 @@ def run_section(r, repo):
         ("p99 (ms)", f'{lat["p99"]}'), ("p99.9 (ms)", f'{lat["p99.9"]}'), ("máx (ms)", f'{lat["max"]:.0f}' if lat["max"] is not None else "–"),
         ("órdenes OK", f'{s["ordenes_ok"]:,}'), ("errores (todas las etiquetas)", f'<span class="{"bad" if s["errores_totales"] else "ok"}">{s["errores_totales"]:,}</span>'),
         ("hilos máx.", s["hilos_max"]), ("duración de la carga", f'{s["duracion_carga_s"]:.0f} s')]) + "</div>")
-    h.append('<div class="card"><table><tr><th>Parámetro</th><th>Valor</th></tr>' + "".join(
+    h.append('<div class="card"><table class="kv"><tr><th>Parámetro</th><th style="text-align:left">Valor</th></tr>' + "".join(
         f"<tr><td>{html.escape(k)}</td><td>{html.escape(str(v))}</td></tr>" for k, v in [
             ("binario probado", r.get("binario", "?")), ("commit / rama del arnés de pruebas (este repositorio al ejecutar)", f'{m.get("commit","?")} / {m.get("rama","?")}'), ("fecha (UTC)", m.get("fecha_utc", "?")), ("escenario", p.get("escenario", "?")),
             ("hilos · rampa · duración · tasa objetivo", f'{p.get("threads","?")} · {p.get("rampup_s","?")} s · {p.get("duration_s","?")} s · {p.get("tps_objetivo","?")}/s'),
@@ -459,9 +497,9 @@ def build_html(cfg, repo, out):
         h.append('<div class="card"><table><tr><th>Corrida</th><th>órd/s media</th><th>p50</th><th>p90</th><th>p95</th><th>p99</th><th>p99.9</th><th>máx (ms)</th><th>errores</th><th>duración carga</th></tr>' + "".join(
             f'<tr><td>{html.escape(names[i])}</td><td>{sums[i]["ordenes_por_s_media"]:,.0f}</td>' + "".join(f'<td>{sums[i]["latencia_ms"][k]}</td>' for k in ("p50", "p90", "p95", "p99", "p99.9")) +
             f'<td>{sums[i]["latencia_ms"]["max"]:.0f}</td><td>{sums[i]["errores_totales"]:,}</td><td>{sums[i]["duracion_carga_s"]:.0f} s</td></tr>' for i in ids) + "</table></div>")
-        cats = ["p50", "p90", "p95", "p99", "p99.9"]
-        h.append(bar_chart("Latencia de POST /orders por percentil (ms, escala log) — vista del cliente (JMeter)", cats, [(names[i], [sums[i]["latencia_ms"][c] for c in cats]) for i in ids], log=True))
-        h.append(bar_chart("Órdenes/s medias durante la carga (JMeter)", ["órdenes/s"], [(names[i], [sums[i]["ordenes_por_s_media"]]) for i in ids], unit="órd/s"))
+        cats = ["p50", "p95", "p99", "p99.9"]
+        h.append(hbar_chart("Latencia de POST /orders por percentil (ms, escala log) — vista del cliente (JMeter)", [(names[i], [sums[i]["latencia_ms"][c] for c in cats]) for i in ids], cats, log=True))
+        h.append(hbar_chart("Órdenes/s medias durante la carga (JMeter; objetivo 5.000)", [(names[i], [sums[i]["ordenes_por_s_media"]]) for i in ids], ["órdenes/s"], unit="órd/s", vmax=6000))
     eng = {}
     for r in runs:
         pmrows = read_csv(Path(repo) / r["dir"] / "prometheus.csv")

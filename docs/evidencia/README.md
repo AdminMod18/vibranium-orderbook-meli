@@ -15,3 +15,11 @@ Registros crudos de las mediciones citadas en `docs/OPTIMIZACION.md`. Se conserv
 | `despues/verify_phase3b.log`, `verify_final.log` | `verify-all` completo: 14/14 PASS |
 
 Entorno de todas las corridas: sandbox de 4 núcleos compartidos con generador, Postgres, Prometheus y Grafana; disco virtual (fsync casi instantáneo).
+
+## Fase JMeter y diagnóstico de la degradación
+| Ruta | Qué es |
+|---|---|
+| `diagnostico_degradacion/` | Perfiles de CPU (`cpu_min2`, `cpu_min12` antes de la corrección; `cpu_fix_min12`, `cpu_fix_min25` después), `gctrace.log` y `top_min12.txt` de la repetición de 15 min. Se leen con `go tool pprof -top -cum <archivo>.pb`. |
+| `validacion_final.md` y `validacion/NN.log` | Tabla y logs crudos de la validación final: `go vet`, `go test -race` con PostgreSQL real, alertas, `verify-all`, plan de integridad de JMeter, `check-recovery.sh` e idempotencia. |
+| `jmeter_resumen.md` | Tablas de todas las corridas de JMeter generadas desde `jmeter/results/*/summary.json` y `prometheus.csv`. |
+| `../../jmeter/results/<corrida>/` | CSV fuente de cada corrida (`timeseries.csv`, `histogram.csv`, `errors.csv`, `labels.csv`, `prometheus.csv`, `summary.json`, `meta.json`, `params.txt`). El `.jtl` crudo no se versiona (≈ 60 B por muestra). |

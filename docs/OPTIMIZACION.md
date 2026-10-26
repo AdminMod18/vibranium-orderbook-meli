@@ -144,7 +144,7 @@ Muestreo cada 5 s (`antes/e1_memoria.log`), en el instante del RSS máximo (3.08
 | p99 de 4 min, estado grande | 101-342 ms (cada 200.000) | **47 ms** (cada 1 M) | A/B intercalado (§3.4) |
 | Desde cero, Postgres activo (14 min antes / 10 min después) | p50 1,97 · p90 10,0 · p99 337 · p99.9 1.339 · máx. 1.712 ms | p50 1,78 · p90 6,9 · p99 202 · p99.9 687 · máx. 887 ms | **no estrictamente**: duraciones distintas y variación entre corridas (A1…A3 varían 3×). No se afirma mejora. |
 
-`verify-all`: **14/14 PASS** (ver `evidencia/despues/verify_phase3b.log`), `go test -race ./...` verde (77 tests; los de Postgres con `TEST_DATABASE_URL`), pruebas de alertas verdes.
+`verify-all`: **14/14 PASS** (ver `evidencia/despues/verify_phase3b.log`), `go test -race ./...` verde (79 tests; los de Postgres con `TEST_DATABASE_URL`), pruebas de alertas verdes.
 
 ## 7. Lo que no se pudo completar o no está demostrado
 
@@ -171,6 +171,20 @@ Medición aislada (`TestDepthCostDoesNotGrowWithOrdersPerLevel`, 200 consultas d
 
 **Resultado de repetir los 30 minutos con la corrección** (misma configuración: JMeter 128 hilos, tasa objetivo 5.000, sin Postgres, estado nuevo):
 
-PENDIENTE_30MIN
+Corrida `jmeter/results/20261026-151602-sostenida-depthfix-30min-sinpg` (inicio 15:16 UTC, 30 min, commit del arnés `1659909`, binario con C6, **sin PostgreSQL**, disco virtual, 128 hilos, tasa objetivo 5.000 órd/s). **Terminó con `rc=0`, sin abortar por disco: 9.603.174 órdenes aceptadas y 0 errores** (todas las etiquetas, incluidas las validaciones de negocio y la conservación de valor final).
 
-**Conclusión honesta.** El hallazgo y la corrección están respaldados por un perfil y por tests; el efecto sobre los 30 minutos se mide arriba. Esto **no** significa que el sistema esté listo para producción: sigue habiendo lecturas pesadas dentro del secuenciador (`/audit`, la copia del snapshot — L17/L21), y la prueba sigue siendo en disco virtual y sin Postgres.
+| Bloque | Antes (corrida de 30 min con `Depth` O(órdenes)) | Después (C6) |
+|---|---|---|
+| Throughput medio 0–5 / 5–10 / 10–15 / 15–20 / 20–25 / 25–30 min | 5.456 / 5.640 / 4.951 / 4.391 / 4.398 / **4.140** órd/s | 5.144 / 5.112 / 5.341 / 5.319 / 5.580 / **5.512** órd/s |
+| p99 mediano del cliente por bloque (ms) | 23 → 33 → 47 → 65 → 76 → **87** | 23 → 27 → 23 → 17 → 17 → **16** |
+| p99 del matching+liquidación por lote (ms, mediana del bloque) | 1,9 → 6,2 → 13,9 → 20,2 → 24,7 → **29,6** | 0,6 → 0,6 → 0,7 → 0,7 → 0,7 → **0,8** |
+| p99 de la cola (ms) | 7,7 → … → **81,5** | 6,8 → … → **12,5** |
+| Global (30 min) | 8,69 M órdenes · 4.829 órd/s · p50 5 · p90 28 · p95 39 · p99 66 · p99.9 110 · máx 1.388 ms | **9,60 M órdenes · 5.334 órd/s · p50 3 · p90 10 · p95 15 · p99 30 · p99.9 65 · máx 1.556 ms** |
+| Ventanas de 5 s con ≥ 4.900 órd/s (t ≥ 60 s) | 42 % | **82 %** (mínimo 3.341; p5 4.448) |
+
+El perfil de CPU de 30 s a los 12 y a los 25 min **ya no contiene `Book.Depth`** (antes: 18,4 %); `processBatch` pasó de 11,5 s a 7,3 s de CPU por 30 s aun con más throughput. La profundidad máxima de la cola fue 128 (tope del número de hilos de JMeter).
+
+**Lo que sigue sin estar bien en esa misma corrida [LIMITACIÓN]:** (a) las **pausas del snapshot** siguen creciendo con el estado (hasta **1.524 ms**) y son lo que explica el máximo de 1,5 s y las ventanas por debajo de 4.900 (L21); (b) heap y RSS crecen de forma monótona (heap 135 → 1.549 MiB; RSS máx. 2.503 MiB) porque el generador deja millones de órdenes en el libro; (c) el espacio libre de disco llegó a **0,47 GiB** según la métrica del servidor: la corrida estuvo cerca de llenar el disco del entorno; (d) **sin PostgreSQL y en disco virtual**.
+
+
+**Conclusión honesta.** El hallazgo y la corrección están respaldados por un perfil, por tests con mutación y por una repetición de 30 minutos en la que la degradación **desapareció** (throughput estable en 5.1–5.6 mil órd/s; p99 del matching 0,6–0,8 ms). Esto **no** significa que el sistema esté listo para producción: sigue habiendo lecturas pesadas dentro del secuenciador (`/audit`, la copia del snapshot — L17/L21), y la prueba sigue siendo en disco virtual y sin Postgres.

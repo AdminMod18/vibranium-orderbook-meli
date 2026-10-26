@@ -2,12 +2,12 @@
  "titulo": "Informe de rendimiento — Vibranium Order Book (JMeter)",
  "subtitulo": "Escenarios de JMeter contra el servicio real, con las métricas del motor (Prometheus) alineadas por tiempo. Entrega para revisión, no certificación de producción.",
  "generado": "2026-10-26",
- "commit": "4f2ed7c (arnés) + informe",
+ "commit": "ver commit del repositorio al entregar",
  "rama": "claude/focused-babbage-2ppmql",
  "entorno": "sandbox de 4 núcleos COMPARTIDOS entre JMeter, el servidor, Postgres y Prometheus; 16 GB RAM; disco VIRTUAL (no es almacenamiento real: el fsync cuesta ≈ 0,4 ms); JMeter 5.6.3, Java 21; JMeter se conecta a la IP del contenedor (sin docker-proxy). Cada corrida arranca con estado vacío (volúmenes nuevos).",
- "introduccion_html": "<div class=\"warn\"><b>Cómo leer este informe.</b> (1) Todo lo etiquetado <span class=\"badge b-j\">JMeter</span> es lo que vio el <i>cliente</i> y sale del <code>.jtl</code>; lo etiquetado <span class=\"badge b-m\">Prometheus</span> es lo que reportó el <i>motor</i>. (2) En este entorno <b>JMeter y el servidor compiten por los mismos 4 núcleos</b> y JMeter —con validación de negocio completa de cada respuesta— consume más CPU que el servidor: su techo (≈ 4,3–5,5 mil órdenes/s) <b>no es el techo del sistema</b>. (3) JMeter es de lazo cerrado: no incluye en su latencia el atraso por pausas del servidor (omisión coordinada). (4) <b>Ninguna corrida demuestra 5.000 órdenes/s sostenidas con validación completa</b>: ver la tabla y la corrida de 30 minutos.</div>",
+ "introduccion_html": "<div class=\"warn\"><b>Cómo leer este informe.</b> (1) Todo lo etiquetado <span class=\"badge b-j\">JMeter</span> es lo que vio el <i>cliente</i> y sale del <code>.jtl</code>; lo etiquetado <span class=\"badge b-m\">Prometheus</span> es lo que reportó el <i>motor</i>. (2) En este entorno <b>JMeter y el servidor compiten por los mismos 4 núcleos</b> y JMeter —con validación de negocio completa de cada respuesta— consume más CPU que el servidor: su techo (≈ 4,3–5,5 mil órdenes/s) <b>no es el techo del sistema</b>. (3) JMeter es de lazo cerrado: no incluye en su latencia el atraso por pausas del servidor (omisión coordinada). (4) Las corridas <b>con PostgreSQL</b> no llegan a 5.000 órd/s (techo de JMeter); la única que sostiene ≈ 5.000 con validación completa es la de 30 minutos <b>sin PostgreSQL</b> y con la corrección de <code>Depth</code>.</div>",
  "comparacion_html": "<p class=\"note\">«ANTES» y «DESPUÉS» usan el mismo plan, la misma tasa objetivo (5.000 órd/s con 128 hilos), el mismo entorno y volúmenes nuevos; JMeter satura alrededor de 4.300 órd/s en ambas, así que la comparación válida es <b>a igual carga ofrecida</b>: latencia y recursos del motor, no throughput.</p>",
- "limitaciones_html": "<ul><li><b>Un solo entorno de 4 núcleos compartidos y disco virtual.</b> No hay almacenamiento real: el costo real del fsync y el beneficio real del group commit no se midieron.</li><li><b>JMeter limita el throughput</b> (consume ≈ 2,2 núcleos y valida cada respuesta con Groovy). La capacidad del servidor medida con el generador <i>open-loop</i> del proyecto (<code>cmd/loadgen</code>, dentro de la red de Docker) fue mayor: hasta 16.000 órd/s (<code>docs/INFORME_PRUEBAS.md</code> §2).</li><li><b>La corrida de 30 minutos fue SIN PostgreSQL</b> (por espacio en disco: con Postgres necesita ≈ 10 GB y el entorno tiene ≈ 5 GB). No es comparable 1:1 con las de 10 minutos, que sí tienen Postgres.</li><li><b>Degradación con el tiempo:</b> en los 30 minutos el throughput bajó de ≈ 5.500 a ≈ 4.100 órd/s y el p99 subió de ≈ 23 a ≈ 87 ms mientras el estado crecía (ver esa sección). No se demostró 5.000 órd/s sostenidas.</li><li>Las corridas «antes» y «después» son <b>una sola repetición cada una</b>; el p99 varía hasta ≈ 3× entre repeticiones en este entorno. Las diferencias de latencia entre ellas (p99 57 → 48 ms) <b>no son concluyentes</b>; las de memoria y pausas del GC son grandes y consistentes con las mediciones previas (docs/OPTIMIZACION.md).</li><li>Los percentiles de JMeter son de <code>POST /orders</code> exitosos (201 con validación de negocio superada). Los errores esperados del contrato (400/409/422/404) se validan y cuentan como aciertos.</li><li>Series del motor muestreadas cada 5 s: no capturan pausas más cortas que eso (el GC máximo reciente sí las refleja).</li></ul>",
+ "limitaciones_html": "<ul><li><b>Un solo entorno de 4 núcleos compartidos y disco virtual.</b> No hay almacenamiento real: el costo real del fsync y el beneficio real del group commit no se midieron.</li><li><b>JMeter limita el throughput</b> (consume ≈ 2,2 núcleos y valida cada respuesta con Groovy). La capacidad del servidor medida con el generador <i>open-loop</i> del proyecto (<code>cmd/loadgen</code>, dentro de la red de Docker) fue mayor: hasta 16.000 órd/s (<code>docs/INFORME_PRUEBAS.md</code> §2).</li><li><b>La corrida de 30 minutos fue SIN PostgreSQL</b> (por espacio en disco: con Postgres necesita ≈ 10 GB y el entorno tiene ≈ 5 GB). No es comparable 1:1 con las de 10 minutos, que sí tienen Postgres.</li><li><b>Degradación hallada y corregida:</b> la primera corrida de 30 min se degradó (5.500 → 4.100 órd/s) por <code>Book.Depth</code>; la repetición con la corrección no se degradó. <b>Sigue sin demostrarse</b> con Postgres, en disco real y con el generador en otra máquina.</li><li>Las corridas «antes» y «después» son <b>una sola repetición cada una</b>; el p99 varía hasta ≈ 3× entre repeticiones en este entorno. Las diferencias de latencia entre ellas (p99 57 → 48 ms) <b>no son concluyentes</b>; las de memoria y pausas del GC son grandes y consistentes con las mediciones previas (docs/OPTIMIZACION.md).</li><li>Los percentiles de JMeter son de <code>POST /orders</code> exitosos (201 con validación de negocio superada). Los errores esperados del contrato (400/409/422/404) se validan y cuentan como aciertos.</li><li>Series del motor muestreadas cada 5 s: no capturan pausas más cortas que eso (el GC máximo reciente sí las refleja).</li></ul>",
  "runs": [
   {
    "id": "antes",
@@ -22,14 +22,25 @@
   },
   {
    "id": "despues",
-   "titulo": "DESPUÉS — sostenida 10 min, con PostgreSQL",
-   "corto": "DESPUÉS · 10 min · PG",
+   "titulo": "DESPUÉS (C1–C5) — sostenida 10 min, con PostgreSQL",
+   "corto": "DESPUÉS C1–C5 · 10 min · PG",
    "dir": "jmeter/results/20261026-134456-sostenida-despues-sostenida-pg",
    "descripcion": "Binario con las optimizaciones.",
    "condiciones": "con PostgreSQL, 128 hilos, tasa objetivo 5.000 órd/s, snapshot cada 1.000.000 registros",
    "almacenamiento": "disco virtual del sandbox (no es almacenamiento real)",
    "aviso": "",
-   "binario": "7fa3933 (el servidor es idéntico en 4f2ed7c, el commit del arnés)"
+   "binario": "7fa3933: optimizaciones C1–C5, SIN la corrección C6 de Depth (el servidor es idéntico en 4f2ed7c)"
+  },
+  {
+   "id": "despues_c6",
+   "titulo": "DESPUÉS + C6 (Depth) — sostenida 10 min, con PostgreSQL",
+   "corto": "DESPUÉS + C6 · 10 min · PG",
+   "dir": "jmeter/results/20261026-154902-sostenida-despues-c6-sostenida-pg",
+   "descripcion": "Binario con todas las optimizaciones, incluida la corrección de Book.Depth.",
+   "condiciones": "con PostgreSQL activo, 128 hilos, tasa objetivo 5.000 órd/s, snapshot cada 1.000.000",
+   "almacenamiento": "disco virtual del sandbox (no es almacenamiento real)",
+   "aviso": "Con Postgres, JMeter vuelve a saturar en ≈ 4.300 órd/s: el techo es el de JMeter + CPU compartida, así que la corrección de Depth no puede verse como más throughput aquí; sí se ve en la corrida de 30 min.",
+   "binario": "1659909 (todas las optimizaciones, con C6)"
   },
   {
    "id": "gradual",
@@ -55,13 +66,13 @@
   },
   {
    "id": "treinta",
-   "titulo": "Resistencia — 30 min a 5.000 órd/s objetivo, SIN PostgreSQL",
-   "corto": "30 MIN · sin PG",
+   "titulo": "Resistencia 30 min SIN la corrección de Depth — SIN PostgreSQL",
+   "corto": "30 MIN · sin PG · antes de C6",
    "dir": "jmeter/results/20261026-140958-sostenida-despues-30min-sinpg",
-   "descripcion": "Cuatro veces el estado de las corridas de 10 min; 8,7 millones de órdenes.",
+   "descripcion": "Primera corrida de 30 minutos, antes de corregir Book.Depth (C6).",
    "condiciones": "SIN PostgreSQL (DATABASE_URL vacío); el journal sí se escribe y se sincroniza",
    "almacenamiento": "disco virtual del sandbox (no es almacenamiento real)",
-   "aviso": "<b>Esta corrida NO demuestra 5.000 órd/s sostenidas.</b> Promedio 4.829 órd/s, pero solo el 42 % de las ventanas de 5 s llegó a ≥ 4.900 y el último tramo de 5 min promedió ≈ 4.140 órd/s con p99 mediano de ≈ 87 ms: el sistema se degradó mientras el estado crecía. Sin PostgreSQL por falta de disco; en disco virtual.",
+   "aviso": "<b>Esta corrida mostró una degradación</b>: el throughput bajó de ≈ 5.500 a ≈ 4.100 órd/s y el p99 subió de ≈ 23 a ≈ 87 ms mientras crecía el libro. La causa (verificada con un perfil de CPU) fue <code>Book.Depth</code>; ver la corrida siguiente, ya con la corrección. Sin PostgreSQL por falta de disco; disco virtual.",
    "binario": "7fa3933 (el servidor es idéntico en 4f2ed7c, el commit del arnés)"
   },
   {
@@ -85,6 +96,28 @@
    "almacenamiento": "disco virtual del sandbox (no es almacenamiento real)",
    "aviso": "",
    "binario": "7fa3933 (el servidor es idéntico en 4f2ed7c, el commit del arnés)"
+  },
+  {
+   "id": "diag",
+   "titulo": "Diagnóstico — 15 min SIN la corrección de Depth, SIN PostgreSQL, con gctrace y perfiles de CPU",
+   "corto": "15 MIN · diag · antes de C6",
+   "dir": "jmeter/results/20261026-145748-sostenida-diag-degradacion",
+   "descripcion": "Repetición con GODEBUG=gctrace=1 y perfiles de CPU a los 2 y 12 min (docs/evidencia/diagnostico_degradacion/). Mostró Depth con el 18,4 % de la CPU y el GC con el 2 %.",
+   "condiciones": "SIN PostgreSQL; gctrace activo (añade algo de ruido)",
+   "almacenamiento": "disco virtual del sandbox (no es almacenamiento real)",
+   "aviso": "",
+   "binario": "7fa3933 (servidor sin la corrección C6)"
+  },
+  {
+   "id": "treinta_fix",
+   "titulo": "Resistencia 30 min CON la corrección de Depth — SIN PostgreSQL",
+   "corto": "30 MIN · sin PG · con C6",
+   "dir": "jmeter/results/20261026-151602-sostenida-depthfix-30min-sinpg",
+   "descripcion": "Misma configuración que la corrida de 30 min anterior, con el binario que incluye la corrección C6.",
+   "condiciones": "SIN PostgreSQL (DATABASE_URL vacío); el journal sí se escribe y se sincroniza; 128 hilos; tasa objetivo 5.000 órd/s; inicio 15:16 UTC",
+   "almacenamiento": "disco virtual del sandbox (no es almacenamiento real)",
+   "aviso": "<b>Lectura honesta.</b> Sin degradación: 9,6 M órdenes, 0 errores, 5.334 órd/s de media y el 82 % de las ventanas de 5 s ≥ 4.900 órd/s (mínimo 3.341: pausas del snapshot de hasta 1,5 s). Es una prueba <b>sin PostgreSQL, en disco virtual y con JMeter en la misma máquina</b>; no equivale a 30 minutos con Postgres ni en almacenamiento real. El disco libre llegó a 0,47 GiB.",
+   "binario": "1659909 (incluye la corrección C6 de Book.Depth)"
   }
  ]
 }

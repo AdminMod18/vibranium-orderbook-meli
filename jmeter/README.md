@@ -5,7 +5,7 @@ visual. Está pensado para ejecutarse **solo contra un entorno de pruebas exclus
 
 | Archivo | Qué es |
 |---|---|
-| `vibranium-integrity.jmx` | **Integridad financiera**: 1 hilo, determinista, 24 pasos con importes exactos (no es una prueba de carga). |
+| `vibranium-integrity.jmx` | **Integridad financiera**: 1 hilo, determinista, 25 pasos con importes exactos (27 con el historial de Postgres), con elección automática de una banda de precios aislada (no es una prueba de carga). |
 | `vibranium-load.jmx` | **Carga**: línea base → fondeo → carga parametrizable → auditoría de conservación de valor. |
 | `generate_plans.py` | Genera los dos `.jmx` (el XML no se edita a mano; la lógica de validación está en Groovy legible dentro de este archivo). |
 | `run-jmeter.sh` | Ejecuta un escenario, guarda los resultados en `jmeter/results/<fecha>-<escenario>/` y los resume. |
@@ -62,6 +62,9 @@ idempotencia (409), todos los errores del contrato, y conservación de valor; co
 | **Carga** (gradual, sostenida, estrés) | `vibranium-load.jmx` | ¿cuánto aguanta y con qué latencia? Valida el negocio respuesta a respuesta, pero NO prueba cada importe. |
 | **Integridad financiera** | `vibranium-integrity.jmx` | ¿cada importe es exacto? Un hilo, orden fijo, sin concurrencia. |
 | **Recuperación ante caídas** | `scripts/drill-*.sh`, `scripts/verify-all.sh` | ¿qué pasa si el proceso muere, Postgres cae o el disco se llena? JMeter no puede matar procesos; se usa el mismo `integridad` antes y después si se quiere (`./jmeter/run-jmeter.sh integridad` tras reiniciar). |
+
+## Requisito del plan de integridad: libro aislado
+Un comprador se cruza con **toda** oferta ≤ su límite y un vendedor con toda demanda ≥ el suyo, así que el plan determinista necesita que sus órdenes no se crucen con las de nadie más. Por eso su primer paso (`01b`) lee el libro y **elige una banda de precios en el hueco** entre la mejor compra y la mejor venta (o `777000` si el libro está vacío; `-Jbase_price` lo cambia). Si no hay un hueco de al menos 3 centavos, **falla con «PRECONDICIÓN NO CUMPLIDA»** en lugar de dar un resultado engañoso: ejecútelo con el libro vacío (`docker compose down -v && docker compose up -d`) o sin carga simultánea.
 
 ## Seguridad y datos
 - Las pruebas **crean** datos (usuarios `jm<run>-uN`, depósitos y órdenes) y no los borran: la API no tiene `DELETE` de usuarios. Por eso `run-jmeter.sh` **se niega** a apuntar a un host que no sea `localhost` salvo `ALLOW_REMOTE=1`.

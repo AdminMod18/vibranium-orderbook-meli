@@ -1,20 +1,20 @@
-2026-10-26 15:15:52,765 INFO o.a.j.u.JMeterUtils: Setting Locale to en_EN
-2026-10-26 15:15:52,786 INFO o.a.j.JMeter: Loading user properties from: /opt/apache-jmeter-5.6.3/bin/user.properties
-2026-10-26 15:15:52,786 INFO o.a.j.JMeter: Loading system properties from: /opt/apache-jmeter-5.6.3/bin/system.properties
-2026-10-26 15:15:52,791 INFO o.a.j.JMeter: Copyright (c) 1998-2024 The Apache Software Foundation
-2026-10-26 15:15:52,791 INFO o.a.j.JMeter: Version 5.6.3
-2026-10-26 15:15:52,791 INFO o.a.j.JMeter: java.version=21.0.12.1
-2026-10-26 15:15:52,791 INFO o.a.j.JMeter: java.vm.name=OpenJDK 64-Bit Server VM
-2026-10-26 15:15:52,791 INFO o.a.j.JMeter: os.name=Linux
-2026-10-26 15:15:52,792 INFO o.a.j.JMeter: os.arch=amd64
-2026-10-26 15:15:52,792 INFO o.a.j.JMeter: os.version=6.18.44-fc-v153
-2026-10-26 15:15:52,792 INFO o.a.j.JMeter: file.encoding=UTF-8
-2026-10-26 15:15:52,792 INFO o.a.j.JMeter: java.awt.headless=null
-2026-10-26 15:15:52,792 INFO o.a.j.JMeter: Max memory     =2147483648
-2026-10-26 15:15:52,792 INFO o.a.j.JMeter: Available Processors =4
-2026-10-26 15:15:52,801 INFO o.a.j.JMeter: Default Locale=English (EN)
-2026-10-26 15:15:52,801 INFO o.a.j.JMeter: JMeter  Locale=English (EN)
-2026-10-26 15:15:52,801 INFO o.a.j.JMeter: JMeterHome=/opt/apache-jmeter-5.6.3
-2026-10-26 15:15:52,801 INFO o.a.j.JMeter: user.dir  =/home/user/vibranium-orderbook-meli
-2026-10-26 15:15:52,802 INFO o.a.j.JMeter: PWD       =/home/user/vibranium-orderbook-meli
-2026-10-26 15:15:52,802 INFO o.a.j.JMeter: IP: 127.0.0.1 Name: vm FullName: localhost
+2026-10-26 16:07:50,222 INFO o.a.j.u.JMeterUtils: Setting Locale to en_EN
+2026-10-26 16:07:50,239 INFO o.a.j.JMeter: Loading user properties from: /opt/apache-jmeter-5.6.3/bin/user.properties
+2026-10-26 16:07:50,239 INFO o.a.j.JMeter: Loading system properties from: /opt/apache-jmeter-5.6.3/bin/system.properties
+2026-10-26 16:07:50,244 INFO o.a.j.JMeter: Copyright (c) 1998-2024 The Apache Software Foundation
+2026-10-26 16:07:50,244 INFO o.a.j.JMeter: Version 5.6.3
+2026-10-26 16:07:50,244 INFO o.a.j.JMeter: java.version=21.0.12.1
+2026-10-26 16:07:50,244 INFO o.a.j.JMeter: java.vm.name=OpenJDK 64-Bit Server VM
+2026-10-26 16:07:50,244 INFO o.a.j.JMeter: os.name=Linux
+2026-10-26 16:07:50,244 INFO o.a.j.JMeter: os.arch=amd64
+2026-10-26 16:07:50,244 INFO o.a.j.JMeter: os.version=6.18.44-fc-v153
+2026-10-26 16:07:50,244 INFO o.a.j.JMeter: file.encoding=UTF-8
+2026-10-26 16:07:50,244 INFO o.a.j.JMeter: java.awt.headless=null
+2026-10-26 16:07:50,244 INFO o.a.j.JMeter: Max memory     =2147483648
+2026-10-26 16:07:50,245 INFO o.a.j.JMeter: Available Processors =4
+2026-10-26 16:07:50,253 INFO o.a.j.JMeter: Default Locale=English (EN)
+2026-10-26 16:07:50,253 INFO o.a.j.JMeter: JMeter  Locale=English (EN)
+2026-10-26 16:07:50,253 INFO o.a.j.JMeter: JMeterHome=/opt/apache-jmeter-5.6.3
+2026-10-26 16:07:50,253 INFO o.a.j.JMeter: user.dir  =/home/user/vibranium-orderbook-meli
+2026-10-26 16:07:50,253 INFO o.a.j.JMeter: PWD       =/home/user/vibranium-orderbook-meli
+2026-10-26 16:07:50,254 INFO o.a.j.JMeter: IP: 127.0.0.1 Name: vm FullName: localhost
