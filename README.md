@@ -2,9 +2,30 @@
 
 Libro de ofertas para negociar Vibranium (desafío técnico). Go 1.24.
 
+## Probar
 ```bash
-go test -race ./...                                   # tests
-go test ./internal/engine -bench Submit -benchmem     # rendimiento del matching
+go test -race ./...
+go run ./cmd/server            # escucha en :8080 (PORT, QUEUE_SIZE configurables)
+
+curl -XPOST localhost:8080/deposits -d '{"user_id":"alice","brl":100000}'      # centavos
+curl -XPOST localhost:8080/deposits -d '{"user_id":"bob","vib":50}'
+curl -XPOST localhost:8080/orders   -d '{"id":"s1","user_id":"bob","side":"SELL","price":900,"qty":4}'
+curl -XPOST localhost:8080/orders   -d '{"id":"b1","user_id":"alice","side":"BUY","price":1000,"qty":10}'
+curl localhost:8080/book
+curl localhost:8080/balances/alice
+curl localhost:8080/audit      # verifica que los saldos cuadran
 ```
 
-Estado: **Fase 1 completa** (motor de matching). Ver [docs/DEFENSA.md](docs/DEFENSA.md) para el diseño y sus motivos.
+## Estado
+Fases 1-4a completas: motor de matching, billeteras con reserva de fondos, API + secuenciador, journal durable con group commit y recuperación.
+
+## Probar resiliencia
+```bash
+./scripts/drill-kill9.sh   # carga concurrente -> kill -9 -> reinicio -> verifica saldos
+```
+El estado se guarda en `data/journal.log` (`JOURNAL_PATH`).
+
+## Documentación (para sustentar)
+- [docs/DECISIONES.md](docs/DECISIONES.md) — registro de decisiones, limitaciones conocidas y preguntas para el equipo evaluador.
+- [docs/DEFENSA.md](docs/DEFENSA.md) — explicación fase a fase con preguntas probables.
+- [docs/MEJORAS.md](docs/MEJORAS.md) — backlog de arquitectura: preguntas probables y siguiente paso.

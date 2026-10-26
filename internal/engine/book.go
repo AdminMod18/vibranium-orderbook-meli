@@ -139,7 +139,8 @@ type Result struct {
 	Trades []domain.Trade
 }
 
-func validate(o domain.Order) error {
+// Validate comprueba una orden sin tocar el libro (el exchange la usa antes de reservar fondos).
+func Validate(o domain.Order) error {
 	switch {
 	case o.ID == "" || o.UserID == "":
 		return ErrInvalidOrder
@@ -156,7 +157,7 @@ func validate(o domain.Order) error {
 // Submit procesa una orden límite: la cruza contra el lado opuesto mientras los
 // precios sean compatibles y deja el remanente "en negociación" en el libro.
 func (b *Book) Submit(in domain.Order) (Result, error) {
-	if err := validate(in); err != nil {
+	if err := Validate(in); err != nil {
 		return Result{}, err
 	}
 	if _, dup := b.resting[in.ID]; dup {
@@ -281,6 +282,16 @@ func (b *Book) Depth(side domain.Side, n int) []Level {
 			q += e.Value.(*domain.Order).Remaining()
 		}
 		out = append(out, Level{Price: l.price, Qty: q})
+	}
+	return out
+}
+
+// RestingOrders devuelve copias de todas las órdenes que están en negociación.
+// Sirve para auditar invariantes (p. ej. fondos reservados == órdenes abiertas).
+func (b *Book) RestingOrders() []domain.Order {
+	out := make([]domain.Order, 0, len(b.resting))
+	for _, ref := range b.resting {
+		out = append(out, *ref.order)
 	}
 	return out
 }

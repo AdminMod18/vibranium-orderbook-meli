@@ -32,6 +32,121 @@ El cuello de botella real será el I/O (log, base de datos), no el matching.
 - *¿Por qué precio del maker?* Es la convención estándar: respeta la oferta publicada y da mejora de precio al taker.
 - *¿Qué pasa si compra y venta son del mismo usuario (self-trade)?* **Pendiente de decidir**: hoy se permite; en producción se previene (wash trading).
 
+## Fase 2 — Billeteras, reservas y liquidación (`internal/wallet`, `internal/exchange`)
+
+### El problema que resuelve
+Un bot manda 1.000 compras de R$ 50 con R$ 100 de saldo. Si el saldo solo se mira al ejecutar, gasta el mismo dinero varias veces.
+**Solución: reservar al ingresar la orden.**
+
+| Evento | Efecto en la billetera |
+|---|---|
+| Orden de compra entra | `BRLFree -> BRLHeld` por `Price*Qty` |
+| Orden de venta entra | `VIBFree -> VIBHeld` por `Qty` |
+| Sin saldo libre | La orden se rechaza y **ni toca el libro** (`ErrInsufficientFunds`) |
+| Trade a precio P (cantidad q) | Comprador: sale `L*q` de lo reservado, `P*q` se paga y `(L-P)*q` vuelve a libre; recibe `q` VIB. Vendedor: sale `q` VIB reservado y recibe `P*q` BRL libre. (`L` = límite de compra) |
+| Cancelación | Se libera lo reservado de la cantidad no ejecutada |
+
+Una orden = 3 pasos en un mismo goroutine: **1) reservar, 2) cruzar, 3) liquidar**. Nadie ve estados intermedios.
+
+### Invariantes (la "prueba de que los saldos cuadran")
+1. **Conservación**: la suma de BRL y de VIB de todo el sistema nunca cambia (sin depósitos/retiros). `Ledger.Totals()`.
+2. **Sin negativos** en ninguna billetera.
+3. **Reservas == órdenes abiertas**: lo `Held` de cada usuario es exactamente `sum(Price*Remaining)` de sus compras abiertas y `sum(Remaining)` de sus ventas abiertas. `Exchange.CheckInvariants()`.
+
+`TestRandomizedConservation` los verifica tras **cada** operación de una simulación caótica (cancelaciones, parciales, rechazos).
+Esto es lo que se mostrará al evaluador al terminar su prueba de carga.
+
+### Decisiones
+- **Idempotencia por `order_id`**: un id ya procesado (aunque haya quedado FILLED y salido del libro) se rechaza (`ErrDuplicateOrder`). Un reintento del cliente no duplica una orden. En Fase 4 este set pasa a persistirse.
+- **Liquidación que falla = `panic`**: si `Settle` detecta una inconsistencia es un bug, no un error de usuario. Es preferible detener el proceso (y recuperarlo desde el log) a seguir con saldos corruptos. `Settle` comprueba precondiciones antes de mutar, nunca deja una liquidación a medias.
+- **Self-trade**: permitido y consistente (el patrimonio no cambia, hay test). Prevenirlo es una mejora de producto (anti wash-trading).
+- **Sin fees** en el MVP. Se añadirían como una tercera pata en `Settle` hacia una cuenta de la plataforma.
+
+### Preguntas probables
+- *¿Y si el servicio muere entre reservar y cruzar?* Hoy todo es memoria, no hay estado a medias. En Fase 4 el log de órdenes es la fuente de verdad: al reiniciar se reproduce y se reconstruye libro y saldos de forma determinista.
+- *¿Por qué reservar y no validar al ejecutar?* Porque una orden puede esperar en el libro minutos; sin reserva, otras órdenes gastarían ese saldo y el trade fallaría en la liquidación.
+- *¿Por qué devolver la diferencia al comprador?* Reservó a su límite pero pagó el precio del maker.
+
+## Fase 3 — API y secuenciador (`internal/sequencer`, `internal/api`, `cmd/server`)
+
+### Cómo se maneja "miles de órdenes en el mismo milisegundo"
+```
+  N requests HTTP concurrentes (goroutines)
+          │  cada una: valida JSON -> crea un comando -> intenta ENCOLAR (no bloqueante)
+          ▼
+   [ cola acotada (chan) ]  ── llena? ──► 503 + Retry-After  (backpressure)
+          │
+          ▼
+   UN goroutine "secuenciador": toma comandos de a uno, en orden, y ejecuta Exchange
+          │  (reservar -> cruzar -> liquidar), sin locks
+          ▼
+   responde por un canal propio de cada comando -> la request HTTP devuelve el resultado
+```
+- **El orden de la cola ES el orden total del libro**: define quién llegó primero (prioridad de tiempo).
+- Las goroutines HTTP son baratas y paralelas; lo único serializado es lo que *debe* serlo.
+- **Backpressure**: encolar nunca bloquea; con la cola llena se responde `503` al instante. Una cola infinita escondería la sobrecarga y acabaría en OOM.
+- **Responder sin bloquear**: el canal de respuesta tiene buffer 1, así el secuenciador jamás se frena por un cliente lento.
+
+### Endpoints
+| Método y ruta | Uso | Códigos |
+|---|---|---|
+| `POST /orders` | `{id?, user_id, side: BUY\|SELL, price, qty}` → orden + trades | 201, 400, 409 (id repetido), 422 (sin saldo), 503 (cola llena) |
+| `DELETE /orders/{id}` | Cancela y libera la reserva | 200, 404 |
+| `GET /balances/{user}` | Saldos libre/reservado en BRL y VIB | 200 |
+| `POST /deposits` | `{user_id, brl, vib}` siembra saldos (solo para pruebas) | 204, 400 |
+| `GET /book?depth=N` | Niveles agregados de compras y ventas | 200 |
+| `GET /audit` | Verifica invariantes y totales | 200 / 500 |
+| `GET /healthz` | Liveness | 200 |
+
+Precios en **centavos**, cantidades en **unidades**. El `id` de la orden es la clave de idempotencia.
+
+### Apagado ordenado (`cmd/server`)
+SIGTERM → 1) `srv.Shutdown` deja de aceptar y espera las requests en vuelo → 2) `seq.Stop()` vacía la cola → salir.
+Ninguna orden aceptada se pierde por un deploy.
+
+### Preguntas probables
+- *¿Por qué no un lock sobre el libro?* Con locks, miles de goroutines compiten y el orden de adquisición no es el de llegada; la cola da orden explícito y evita contención.
+- *¿Qué pasa si hay más de 5.000 órdenes/s?* El secuenciador procesa ~1M/s; el límite real será red/HTTP. Si se satura, 503 con `Retry-After`, nunca pérdida silenciosa.
+- *¿Y si la API tiene varias réplicas?* Son stateless y todas hablan con el mismo secuenciador. Hoy comparten proceso; en la Fase 4 el secuenciador se alimenta de un log y la API puede separarse.
+- *¿El cliente puede reintentar sin riesgo?* Sí si envía `id`: un reintento da `409` en vez de duplicar. Limitación L2: tras un timeout no ve el resultado original (ver `DECISIONES.md`).
+- *¿Qué hace el `panic` por inconsistencia dentro del secuenciador?* Detiene el proceso; el orquestador lo reinicia y la Fase 4 reconstruye el estado desde el log.
+
+## Fase 4a — Durabilidad y recuperación (`internal/journal`)
+
+### Cómo funciona
+```
+ comando ──► secuenciador ejecuta en memoria ──► Append al buffer del journal
+                  (lote de hasta 1024 comandos)          │
+                                                         ▼
+                                     UN fsync para todo el lote  (group commit)
+                                                         │
+                                          recién ahora se responde a cada cliente
+```
+- **Regla de oro: nunca se confirma algo que no esté en disco.** Si el proceso muere antes del fsync, el cliente no recibió confirmación y el log no tiene la orden: coherente.
+- **Recuperación**: al arrancar se lee el journal y se re-ejecuta cada registro sobre un Exchange vacío. Como el motor es determinista, el resultado es idéntico (el test compara cuentas y libro completos). Además se **verifica cada trade** contra lo registrado.
+- **Escritura truncada** (caída a mitad de un registro): el CRC la detecta; se descarta SOLO la cola incompleta y se sigue escribiendo. **Corrupción en medio del log**: error y no arranca (nunca se descartan datos confirmados en silencio).
+
+### Qué pasa si falla...
+| Falla | Efecto | Cómo se recupera |
+|---|---|---|
+| Se cae el proceso (`kill -9`, OOM) | Se pierde la memoria, no el journal | Reinicio: replay (~ms por miles de registros). Probado en `scripts/drill-kill9.sh` |
+| Corte de energía a mitad de escritura | Registro final incompleto | CRC lo detecta, se descarta esa cola; esas órdenes nunca se confirmaron |
+| Falla `write`/`fsync` (disco lleno/dañado) | No se puede garantizar durabilidad | `panic` (fail-stop): mejor caído que mentir; se reinicia desde lo durable |
+| Corrupción real del journal | Estado dudoso | El servidor se niega a arrancar y avisa; requiere intervención humana |
+| Se pierde el disco | Se pierde el log | **Limitación L6**: en producción, volumen replicado/standby (ver `MEJORAS.md`) |
+| La API cae pero el secuenciador no | Sin entrada de requests | Réplicas stateless detrás de un balanceador |
+
+### Números para citar
+- Group commit medido: ~22 comandos por fsync con 50 clientes concurrentes (sube con la carga).
+- Recuperación: ~640-720 registros en 5-6 ms.
+- Drill `kill -9` en plena carga: totales BRL/VIB idénticos antes y después, invariantes OK.
+
+### Preguntas probables
+- *¿Por qué no guardar cada orden en una base de datos?* Un round-trip por orden con consistencia fuerte no llega a 5.000/s con margen y obliga a transacciones sobre el libro. El log secuencial + memoria es órdenes de magnitud más rápido y da el mismo resultado.
+- *¿Y por qué no Kafka?* Es el siguiente paso natural (mismo patrón, log replicado), pero para un MVP es overengineering. El journal está detrás de una interfaz pequeña (`Append/Sync/Reader`) para poder cambiarlo; ver `MEJORAS.md`.
+- *¿Qué garantiza que el replay dé lo mismo?* Determinismo: sin reloj, sin aleatoriedad, un solo hilo, ids asignados por la API y guardados en el log; y la verificación trade a trade.
+- *¿`fsync` por lote no retrasa?* Los comandos del lote esperan unos ms, pero el throughput sube órdenes de magnitud; la latencia es la de un fsync, no la de N.
+- *¿Cuánto tarda recuperar con mucho histórico?* Lineal en el tamaño del log (~1-3 s por millón de registros). Con snapshots + rotación sería constante; está en el backlog por ser una optimización.
+
 ## Próximas fases
-2. Billeteras, reserva de fondos y liquidación · 3. API + cola · 4. Persistencia/recuperación + docker-compose ·
-5. Observabilidad · 6. Pruebas de carga y de fallos.
+4b. Historial en Postgres (proyector) + docker-compose · 5. Observabilidad · 6. Pruebas de carga y de fallos.
