@@ -2,7 +2,9 @@
 # Prueba de humo end-to-end contra el sistema YA levantado (docker compose up -d).
 # Recorre el ciclo completo y falla con un mensaje claro si algo no se comporta como se espera.
 set -uo pipefail
-A=${API:-localhost:8080}
+cd "$(dirname "$0")/.."
+[ -f .env ] && { set -a; . ./.env; set +a; }   # puertos personalizados (ver .env.example)
+A=${API:-localhost:${API_PORT:-8080}}
 RUN=$(date +%s)$RANDOM            # permite repetir el smoke sin chocar con ids/usuarios anteriores
 FAILS=0
 pass() { printf '  [OK]    %s\n' "$1"; }
@@ -55,18 +57,18 @@ has "saldo recalculado desde el historial == saldo del motor" "$r" '"consistent"
 has "la orden y sus trades son consultables" "$(curl -s "$A/orders/s-$RUN")" '"status":"FILLED"'
 
 echo "6) Observabilidad"
-M=${METRICS:-localhost:9102}
+M=${METRICS:-localhost:${METRICS_PORT:-9102}}
 has "GET /readyz = 200" "$(code "$A/readyz")" 200
 r=$(curl -s "$M/metrics")
 has "/metrics (puerto de administración) expone las órdenes" "$r" 'orderbook_orders_total{result="accepted"'
 has "/metrics expone la cola del secuenciador" "$r" 'orderbook_queue_capacity'
 has "/metrics NO está en el puerto público de la API" "$(code "$A/metrics")" 404
-PR=${PROMETHEUS:-localhost:9090}
+PR=${PROMETHEUS:-localhost:${PROMETHEUS_PORT:-9090}}
 if [ "$(code "$PR/-/ready")" = 200 ]; then
   t=""; for i in $(seq 1 20); do t=$(curl -s "$PR/api/v1/targets"); [[ "$t" == *'"health":"up"'* ]] && break; sleep 1; done
   has "Prometheus está leyendo las métricas de la app" "$t" '"health":"up"'
 else printf '  [AVISO] Prometheus no responde en %s (omitido)\n' "$PR"; fi
-GR=${GRAFANA:-localhost:3000}
+GR=${GRAFANA:-localhost:${GRAFANA_PORT:-3000}}
 if [ "$(code "$GR/api/health")" = 200 ]; then
   has "Grafana tiene el dashboard provisionado" "$(curl -s -u admin:admin "$GR/api/search?query=Order")" 'orderbook-overview'
 else printf '  [AVISO] Grafana no responde en %s (omitido)\n' "$GR"; fi

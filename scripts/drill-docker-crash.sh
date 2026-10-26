@@ -8,7 +8,8 @@
 #       reinicia a mano, que igualmente prueba la recuperación del journal desde el volumen.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-A=${API:-localhost:8080}
+[ -f .env ] && { set -a; . ./.env; set +a; }   # puertos personalizados (ver .env.example)
+A=${API:-localhost:${API_PORT:-8080}}
 CNAME=$(docker compose ps -q orderbook)
 [ -n "$CNAME" ] || { echo "la app no está corriendo: docker compose up -d"; exit 1; }
 api() { curl -s "$A$1" "${@:2}"; }

@@ -133,7 +133,8 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 5. ¿La respuesta de la API debe ser síncrona (resultado inmediato) o aceptan `202`?
 6. ¿Cobran comisiones en el MVP?
 
-- **L8 — La etapa de *build* del `Dockerfile` no se pudo ejecutar en el entorno de desarrollo** (los contenedores de build no tenían salida a internet para `go mod download`). Sí se verificó con **Docker real**: la topología completa del compose (Postgres + app, red, volúmenes, healthchecks, política de reinicio) usando un binario compilado en el host con la misma etapa de runtime; el binario estático compila. Antes de la presentación, correr `docker compose up --build` en una máquina con internet.
+- ~~**L8 — La etapa de build del `Dockerfile` no se pudo ejecutar en el entorno de desarrollo.**~~ **Resuelta:** `docker compose up --build` se ejecutó con éxito en una máquina Windows con Docker Desktop (el build completo, `go mod download` incluido, terminó sin errores).
+- **L15 — Puertos del host fijos.** Un PostgreSQL ya instalado en la máquina ocupaba el 5432 y el compose no arrancaba. *Corregido:* puertos configurables por `.env` (`.env.example`), `preflight` los detecta y explica qué hacer, y los scripts los respetan.
 - **L9 — El proyector relee el journal desde el inicio al arrancar** (salta lo ya reflejado). Es O(tamaño del log); con segmentos rotados + índice sería O(1). Ver `MEJORAS.md`.
 - **L10 — Las cifras de rendimiento se midieron en una máquina de 4 núcleos compartida** con disco virtual. Son una referencia, no una garantía; ver `OBSERVABILIDAD.md` (condiciones y colas largas bajo contención). Repetir en la máquina de la presentación.
 - **L11 — Sin trazas distribuidas.** Hay métricas y logs con `request_id`, pero no OpenTelemetry (ver `MEJORAS.md`).

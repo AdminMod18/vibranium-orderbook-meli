@@ -4,7 +4,8 @@
 # (docker compose stop orderbook): dos proyectores sobre la misma BD se pisarían.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-DATABASE_URL=${DATABASE_URL:-postgres://postgres:orderbook@localhost:5432/orderbook}
+[ -f .env ] && { set -a; . ./.env; set +a; }
+DATABASE_URL=${DATABASE_URL:-postgres://postgres:orderbook@localhost:${POSTGRES_PORT:-5432}/orderbook}
 # Por defecto usa docker compose; cada comando puede sustituirse (p. ej. PG_STOP="pg_ctlcluster 16 main stop").
 pg_stop()  { if [ -n "${PG_STOP:-}" ];  then eval "$PG_STOP";  else docker compose stop postgres;  fi; }
 pg_start() { if [ -n "${PG_START:-}" ]; then eval "$PG_START"; else docker compose start postgres; fi; }

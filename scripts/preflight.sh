@@ -18,14 +18,25 @@ if command -v docker >/dev/null 2>&1; then
 fi
 command -v curl >/dev/null 2>&1 && ok "curl" || fail "curl no está instalado" "viene con Git Bash; en Linux: apt install curl"
 
-echo; echo "Puertos (si ya los usa NUESTRO stack no es problema):"
+# Puertos del host: los de ".env" (si existe) o los de por defecto.
+[ -f .env ] && { set -a; . ./.env; set +a; }
+echo; echo "Puertos del host (si ya los usa NUESTRO stack no es problema):"
 ours=""; command -v docker >/dev/null 2>&1 && ours=$(docker compose ps -q 2>/dev/null)
-for p in 8080 5432 9090 3000; do
+for pair in "API_PORT:${API_PORT:-8080}" "POSTGRES_PORT:${POSTGRES_PORT:-5432}" "PROMETHEUS_PORT:${PROMETHEUS_PORT:-9090}" "GRAFANA_PORT:${GRAFANA_PORT:-3000}" "METRICS_PORT:${METRICS_PORT:-9102}"; do
+  var=${pair%%:*}; p=${pair##*:}
   if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then
-    [ -n "$ours" ] && ok "puerto $p en uso (por este stack)" \
-      || warn "el puerto $p ya está ocupado por otro programa" "ciérrelo, o cambie el puerto en docker-compose.yml"
+    if [ -n "$ours" ]; then ok "puerto $p en uso (por este stack)"
+    else
+      fail "el puerto $p ya está ocupado por otro programa (lo necesita $var)" \
+           "cambie el número: cp .env.example .env  y edite $var (p. ej. $var=$((p+1))), o detenga el programa que lo usa"
+      PORTHELP=1
+    fi
   else ok "puerto $p libre"; fi
 done
+if [ "${PORTHELP:-0}" = 1 ]; then
+  echo "           ¿Quién usa el puerto? (Windows, en Git Bash):  netstat -ano | findstr :PUERTO   y luego   tasklist | findstr PID"
+  echo "           Suele ser un PostgreSQL instalado en Windows (servicio 'postgresql-x64-16'); también puede ser un contenedor viejo: docker ps"
+fi
 
 echo; echo "Archivos (saltos de línea):"
 if grep -lU $'\r' scripts/*.sh Dockerfile docker-compose.yml 2>/dev/null | grep -q .; then
