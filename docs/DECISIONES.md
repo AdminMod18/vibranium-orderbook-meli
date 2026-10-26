@@ -45,19 +45,33 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 | D21 | Billeteras se crean por **depósito** (`POST /deposits`), sin registro/login | El desafío indica que no hace falta; sirve para sembrar saldos en la demo | — | ✅ |
 | D22 | **Invariantes auditables** (`CheckInvariants` + `Totals`): conservación, sin negativos, reservas == órdenes abiertas | Es la forma de demostrar "los saldos cuadran" tras la prueba de carga | — | ✅ |
 
+## Durabilidad y recuperación (Fase 4a)
+
+| # | Decisión | Por qué | Alternativas / costo | Estado |
+|---|---|---|---|---|
+| D26 | **Journal (log append-only) como fuente de verdad**; el estado en memoria es una *vista* reconstruible | El motor es determinista ⇒ reproducir el log da exactamente el mismo estado. Es el patrón *event sourcing / write-ahead log* | Guardar el estado en una DB por orden: latencia de red por cada orden, no llega a 5.000/s con consistencia fuerte | ✅ |
+| D27 | **Group commit**: un lote de comandos comparte un único `fsync`; se responde al cliente SOLO después | `fsync` es lo caro (ms). Medido: ~22 comandos por fsync bajo carga concurrente. Cero órdenes confirmadas y perdidas | `fsync` por orden: ~100-1000 órdenes/s en disco típico. Sin `fsync`: rápido pero pierde datos confirmados | ✅ |
+| D28 | Formato `[len][crc32c][JSON]` | El CRC distingue una escritura truncada por la caída (se descarta) de corrupción real (se aborta). JSON = legible/auditable | Binario (protobuf): más compacto/rápido, pero opaco para auditar. Revisable si el volumen lo exige | 🟡 |
+| D29 | **Fail-stop**: si falla escribir o `fsync` el journal ⇒ `panic`; si la recuperación ve corrupción real ⇒ el servidor **no arranca** | Operar sin poder garantizar durabilidad, o con estado dudoso, es peor que estar caído (es dinero) | Degradar a modo memoria: arriesga confirmar órdenes que se perderían | ✅ |
+| D30 | Solo se registran los comandos que **cambian el estado** (lo rechazado y las lecturas no) | Reproducir solo lo exitoso reconstruye el mismo estado; log más pequeño | Registrar todo: más auditoría de rechazos, a costa de espacio (rechazos irían a logs/métricas) | ✅ |
+| D31 | La marca de tiempo del registro es **informativa**, nunca entra en la lógica | Si el matching usara el reloj, reproducir el log no sería determinista | — | ✅ |
+| D32 | Al reproducir se **verifica que cada orden dé los mismos trades** que registró (`ErrDiverged`) | Detecta no-determinismo o un bug de versión al instante, en vez de corromper saldos | — | ✅ |
+| D33 | Recuperación **completa desde el inicio** del log (sin snapshots) en el MVP | Medido: 700 registros en ~6 ms (≈1-3 s por millón). Snapshots son una optimización con complejidad propia | Snapshot + rotación de segmentos: ver `MEJORAS.md` | 🟡 |
+
 ## Plataforma
 
 | # | Decisión | Por qué | Estado |
 |---|---|---|---|
 | D23 | **Go 1.24** | Lenguaje habitual en plataforma/cloud, buena concurrencia, binario único y liviano para Docker | ✅ |
 | D24 | Librería estándar (`net/http`) sin frameworks | Menos dependencias = más fácil de levantar y de defender (anti-overengineering) | ✅ |
-| D25 | Persistencia, recuperación y observabilidad | Ver fases 4 y 5 | ❓ **Pendiente** |
 
 ---
 
 ## Limitaciones conocidas (honestidad ante el evaluador)
 
-- **L1 — Estado en memoria (hoy).** Si el proceso muere se pierde el estado. Se resuelve en la Fase 4 con log de eventos + snapshots + replay.
+- ~~**L1 — Estado en memoria.**~~ Resuelta en Fase 4a: journal + recuperación (probado con `scripts/drill-kill9.sh`). Queda la limitación de disco único: ver L6.
+- **L6 — El journal vive en UN disco.** Si se pierde el volumen se pierde el log. Mitigación de producción: volumen replicado / réplica en espera / Kafka con replicación (ver `MEJORAS.md`).
+- **L7 — No hay candado de proceso único.** Dos instancias escribiendo el mismo journal lo corromperían. En Docker se corre una; en producción hay que usar *leader election* o un lock de archivo (ver `MEJORAS.md`).
 - **L2 — Reintento tras timeout.** Si el cliente corta la conexión después de que la orden entró a la cola, la orden *sí* se procesa pero el cliente no ve el resultado; al reintentar recibe `409`. Mitigación prevista: `GET /orders/{id}` para consultar el estado (Fase 4, requiere historial).
 - **L3 — Un solo secuenciador = un solo punto de falla del mercado.** Mitigación: recuperación rápida desde snapshot+log; en producción, réplica en espera (*hot standby*) consumiendo el mismo log.
 - **L4 — Un instrumento.** El diseño ya separa por mercado, pero el MVP solo expone Vibranium/BRL.

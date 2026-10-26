@@ -17,8 +17,15 @@ curl localhost:8080/audit      # verifica que los saldos cuadran
 ```
 
 ## Estado
-Fases 1-3 completas: motor de matching, billeteras con reserva de fondos, API + secuenciador.
+Fases 1-4a completas: motor de matching, billeteras con reserva de fondos, API + secuenciador, journal durable con group commit y recuperación.
+
+## Probar resiliencia
+```bash
+./scripts/drill-kill9.sh   # carga concurrente -> kill -9 -> reinicio -> verifica saldos
+```
+El estado se guarda en `data/journal.log` (`JOURNAL_PATH`).
 
 ## Documentación (para sustentar)
 - [docs/DECISIONES.md](docs/DECISIONES.md) — registro de decisiones, limitaciones conocidas y preguntas para el equipo evaluador.
 - [docs/DEFENSA.md](docs/DEFENSA.md) — explicación fase a fase con preguntas probables.
+- [docs/MEJORAS.md](docs/MEJORAS.md) — backlog de arquitectura: preguntas probables y siguiente paso.

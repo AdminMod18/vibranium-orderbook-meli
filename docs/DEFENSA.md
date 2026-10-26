@@ -111,5 +111,42 @@ Ninguna orden aceptada se pierde por un deploy.
 - *¿El cliente puede reintentar sin riesgo?* Sí si envía `id`: un reintento da `409` en vez de duplicar. Limitación L2: tras un timeout no ve el resultado original (ver `DECISIONES.md`).
 - *¿Qué hace el `panic` por inconsistencia dentro del secuenciador?* Detiene el proceso; el orquestador lo reinicia y la Fase 4 reconstruye el estado desde el log.
 
+## Fase 4a — Durabilidad y recuperación (`internal/journal`)
+
+### Cómo funciona
+```
+ comando ──► secuenciador ejecuta en memoria ──► Append al buffer del journal
+                  (lote de hasta 1024 comandos)          │
+                                                         ▼
+                                     UN fsync para todo el lote  (group commit)
+                                                         │
+                                          recién ahora se responde a cada cliente
+```
+- **Regla de oro: nunca se confirma algo que no esté en disco.** Si el proceso muere antes del fsync, el cliente no recibió confirmación y el log no tiene la orden: coherente.
+- **Recuperación**: al arrancar se lee el journal y se re-ejecuta cada registro sobre un Exchange vacío. Como el motor es determinista, el resultado es idéntico (el test compara cuentas y libro completos). Además se **verifica cada trade** contra lo registrado.
+- **Escritura truncada** (caída a mitad de un registro): el CRC la detecta; se descarta SOLO la cola incompleta y se sigue escribiendo. **Corrupción en medio del log**: error y no arranca (nunca se descartan datos confirmados en silencio).
+
+### Qué pasa si falla...
+| Falla | Efecto | Cómo se recupera |
+|---|---|---|
+| Se cae el proceso (`kill -9`, OOM) | Se pierde la memoria, no el journal | Reinicio: replay (~ms por miles de registros). Probado en `scripts/drill-kill9.sh` |
+| Corte de energía a mitad de escritura | Registro final incompleto | CRC lo detecta, se descarta esa cola; esas órdenes nunca se confirmaron |
+| Falla `write`/`fsync` (disco lleno/dañado) | No se puede garantizar durabilidad | `panic` (fail-stop): mejor caído que mentir; se reinicia desde lo durable |
+| Corrupción real del journal | Estado dudoso | El servidor se niega a arrancar y avisa; requiere intervención humana |
+| Se pierde el disco | Se pierde el log | **Limitación L6**: en producción, volumen replicado/standby (ver `MEJORAS.md`) |
+| La API cae pero el secuenciador no | Sin entrada de requests | Réplicas stateless detrás de un balanceador |
+
+### Números para citar
+- Group commit medido: ~22 comandos por fsync con 50 clientes concurrentes (sube con la carga).
+- Recuperación: ~640-720 registros en 5-6 ms.
+- Drill `kill -9` en plena carga: totales BRL/VIB idénticos antes y después, invariantes OK.
+
+### Preguntas probables
+- *¿Por qué no guardar cada orden en una base de datos?* Un round-trip por orden con consistencia fuerte no llega a 5.000/s con margen y obliga a transacciones sobre el libro. El log secuencial + memoria es órdenes de magnitud más rápido y da el mismo resultado.
+- *¿Y por qué no Kafka?* Es el siguiente paso natural (mismo patrón, log replicado), pero para un MVP es overengineering. El journal está detrás de una interfaz pequeña (`Append/Sync/Reader`) para poder cambiarlo; ver `MEJORAS.md`.
+- *¿Qué garantiza que el replay dé lo mismo?* Determinismo: sin reloj, sin aleatoriedad, un solo hilo, ids asignados por la API y guardados en el log; y la verificación trade a trade.
+- *¿`fsync` por lote no retrasa?* Los comandos del lote esperan unos ms, pero el throughput sube órdenes de magnitud; la latencia es la de un fsync, no la de N.
+- *¿Cuánto tarda recuperar con mucho histórico?* Lineal en el tamaño del log (~1-3 s por millón de registros). Con snapshots + rotación sería constante; está en el backlog por ser una optimización.
+
 ## Próximas fases
-4. Persistencia/recuperación + docker-compose · 5. Observabilidad · 6. Pruebas de carga y de fallos.
+4b. Historial en Postgres (proyector) + docker-compose · 5. Observabilidad · 6. Pruebas de carga y de fallos.
