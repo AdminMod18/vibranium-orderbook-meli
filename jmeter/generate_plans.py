@@ -385,9 +385,11 @@ def load_plan():
     plan = test_plan("Vibranium Order Book - CARGA",
                      "Plan de carga. Orden: línea base -> fondeo -> carga -> auditoría de conservación. "
                      "Todo se parametriza con -J (host, port, threads, rampup, duration, tps, users, mid_price, spread, cancel_pct, with_history).",
-                     [])
-    inner = (http_defaults() + ht() + setup + main + teardown)
-    return xml(node(plan, inner))
+                     [("__MARK__", "x")])
+    inner = (http_defaults() + ht() + setup + main + teardown +
+             node(listener("SummaryReport", "Summary Report (habilitar para la demo)"), "") +
+             node(listener("StatVisualizer", "Aggregate Report: throughput y percentiles (habilitar para la demo)"), ""))
+    return as_gui_variables(xml(node(plan, inner)), LOAD_VARS)
 
 
 # ---------------------------------------------------------------- plan de INTEGRIDAD FINANCIERA (determinista, 1 hilo)
@@ -475,8 +477,35 @@ vars.put('o1', "jm${run}-o1"); vars.put('o2', "jm${run}-o2"); vars.put('o3', "jm
     plan = test_plan("Vibranium Order Book - INTEGRIDAD FINANCIERA",
                      "Escenario determinista de un solo hilo: valida liquidación exacta, precio del maker, parciales, reservas, cancelación, idempotencia, "
                      "errores del contrato y conservación de valor. NO es una prueba de carga. Parámetros: host, port, protocol, with_history, run_id.",
-                     [])
-    return xml(node(plan, http_defaults() + ht() + tg))
+                     [("__MARK__", "x")])
+    return as_gui_variables(xml(node(plan, http_defaults() + ht() + tg)), INTEGRITY_VARS)
+
+
+LOAD_VARS = [("host", "localhost"), ("port", "8080"), ("protocol", "http"), ("threads", "128"), ("rampup", "30"), ("duration", "600"), ("tps", "5000"),
+             ("users", "100"), ("mid_price", "10000"), ("spread", "50"), ("cancel_pct", "3"), ("with_history", "false"),
+             ("fund_brl", "100000000000"), ("fund_vib", "100000000"), ("connect_timeout_ms", "3000"), ("response_timeout_ms", "10000")]
+INTEGRITY_VARS = [("host", "localhost"), ("port", "8080"), ("protocol", "http"), ("with_history", "false"), ("base_price", "777000")]
+
+
+def as_gui_variables(doc, params):
+    """Convierte las propiedades -J en VARIABLES del plan (tabla «User Defined Variables» del nodo raíz) para poder cambiarlas en la
+    interfaz gráfica. Cada una sigue leyendo -J<nombre> si se pasa por consola: valor = ${__P(nombre,defecto)}. El resto del plan y
+    los scripts usan la variable, no la propiedad."""
+    for n, _ in params:
+        doc = re.sub(r"\$\{__P\(" + n + r",[^)]*\)\}", "${" + n + "}", doc)
+        doc = re.sub(r"props\.getProperty\('" + n + r"'\) \?: '([^']*)'", r"(vars.get('" + n + r"') ?: PROPSGET('" + n + r"') ?: '\1')", doc)
+        doc = doc.replace("props.getProperty('" + n + "')", "vars.get('" + n + "')")
+    doc = doc.replace("PROPSGET(", "props.getProperty(")
+    items = "".join(f'<elementProp name="{esc(k)}" elementType="Argument">{sprop("Argument.name", k)}{sprop("Argument.value", "${__P(%s,%s)}" % (k, d))}'
+                    f'{sprop("Argument.metadata", "=")}</elementProp>' for k, d in params)
+    marker = re.compile(r'<elementProp name="__MARK__" elementType="Argument">.*?</elementProp>', re.S)
+    return marker.sub(lambda _m: items, doc, count=1)
+
+
+def listener(gui, name):
+    """Receptores para la demo en la interfaz gráfica. Van DESHABILITADOS: guardan estadísticas de todas las muestras y en una corrida
+    larga por consola gastarían memoria. En la GUI: clic derecho sobre el receptor -> Enable, o Ctrl+T."""
+    return element("ResultCollector", gui, name, bprop("ResultCollector.error_logging", False) + sprop("filename", ""), enabled=False)
 
 
 def xml(root_inner):

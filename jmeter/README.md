@@ -20,7 +20,20 @@ visual. Está pensado para ejecutarse **solo contra un entorno de pruebas exclus
 - **Python 3.9+** (solo biblioteca estándar) para resumir resultados y generar el informe.
 - La API en marcha: `docker compose up -d` (por defecto `http://localhost:8080`). Para correlacionar con el motor hace falta Prometheus (lo levanta el compose en `:9090`).
 
-## Ejecutar
+## Ejecutar desde la interfaz gráfica de JMeter (recomendado para presentar)
+1. Abra JMeter (`bin/jmeter.bat` en Windows, `bin/jmeter` en Linux/macOS) y cargue **`jmeter/vibranium-load.jmx`** (File → Open).
+2. Haga clic en el nodo raíz **«Vibranium Order Book - CARGA»**: ahí está la tabla **User Defined Variables** con todos los parámetros. Edite el valor y listo:
+   - **`duration`**: duración de la carga en **segundos** (`600` = 10 min, `1800` = 30 min, `3600` = 1 h…).
+   - `threads` (usuarios concurrentes), `rampup` (segundos en subir de 0 a `threads`), `tps` (órdenes/s objetivo; `0` = sin tope), `users` (usuarios ficticios que se fondean).
+   - `host` / `port` / `protocol` (servidor bajo prueba; por defecto `localhost:8080`), `mid_price` / `spread` / `cancel_pct`, `with_history` (`true` si Postgres está activo).
+3. Para ver números en vivo, active los receptores **Summary Report** y **Aggregate Report** (clic derecho → *Enable*; vienen deshabilitados porque en corridas largas gastan memoria).
+4. Pulse **Start** (▶). Para detener antes de tiempo: **Stop** (■). Al terminar, el paso final comprueba la auditoría (`GET /audit`) y la conservación de valor; si falla, aparece en rojo.
+Para la integridad financiera abra `jmeter/vibranium-integrity.jmx` y pulse Start (es de un solo hilo y dura segundos).
+Cualquiera de esos valores también se puede pasar por consola: `-Jduration=1800` tiene prioridad sobre lo que diga la tabla.
+
+> La **interfaz gráfica es para presentar y para pruebas cortas**: JMeter recomienda correr las cargas largas en modo consola (más abajo), porque la GUI consume CPU y puede distorsionar la medición.
+
+## Ejecutar por consola
 ```bash
 docker compose up -d
 ./jmeter/run-jmeter.sh integridad     # ~3 s. Debe terminar con "errores totales = 0"; si no, sale con código 3.
