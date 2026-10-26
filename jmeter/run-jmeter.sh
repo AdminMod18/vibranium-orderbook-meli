@@ -67,7 +67,7 @@ START=$(date +%s)
 echo ">> $ESC: $PLAN  hilos=$THREADS rampa=${RAMPUP}s duración=${DURATION}s tasa=${TPS}/s run_id=$RUN_ID  ->  $OUT"
 "$JM" -n -t "$PLAN" -l "$OUT/results.jtl" -j "$OUT/jmeter.log" \
   -Jhost="$HOST" -Jport="$PORT" -Jprotocol="$PROTOCOL" -Jthreads="$THREADS" -Jrampup="$RAMPUP" -Jduration="$DURATION" \
-  -Jtps="$TPS" -Jusers="$USERS" -Jrun_id="$RUN_ID" -Jwith_history="${WITH_HISTORY:-false}" \
+  -Jtps="$TPS" -Jusers="$USERS" -Jrun_id_fijo="$RUN_ID" -Jwith_history="${WITH_HISTORY:-false}" \
   ${MID_PRICE:+-Jmid_price=$MID_PRICE} ${SPREAD:+-Jspread=$SPREAD} ${CANCEL_PCT:+-Jcancel_pct=$CANCEL_PCT} ${BASE_PRICE:+-Jbase_price=$BASE_PRICE} \
   -Jjmeter.save.saveservice.output_format=csv -Jjmeter.save.saveservice.timestamp_format=ms \
   -Jjmeter.save.saveservice.print_field_names=true -Jjmeter.save.saveservice.thread_counts=true \
