@@ -67,5 +67,49 @@ Esto es lo que se mostrará al evaluador al terminar su prueba de carga.
 - *¿Por qué reservar y no validar al ejecutar?* Porque una orden puede esperar en el libro minutos; sin reserva, otras órdenes gastarían ese saldo y el trade fallaría en la liquidación.
 - *¿Por qué devolver la diferencia al comprador?* Reservó a su límite pero pagó el precio del maker.
 
+## Fase 3 — API y secuenciador (`internal/sequencer`, `internal/api`, `cmd/server`)
+
+### Cómo se maneja "miles de órdenes en el mismo milisegundo"
+```
+  N requests HTTP concurrentes (goroutines)
+          │  cada una: valida JSON -> crea un comando -> intenta ENCOLAR (no bloqueante)
+          ▼
+   [ cola acotada (chan) ]  ── llena? ──► 503 + Retry-After  (backpressure)
+          │
+          ▼
+   UN goroutine "secuenciador": toma comandos de a uno, en orden, y ejecuta Exchange
+          │  (reservar -> cruzar -> liquidar), sin locks
+          ▼
+   responde por un canal propio de cada comando -> la request HTTP devuelve el resultado
+```
+- **El orden de la cola ES el orden total del libro**: define quién llegó primero (prioridad de tiempo).
+- Las goroutines HTTP son baratas y paralelas; lo único serializado es lo que *debe* serlo.
+- **Backpressure**: encolar nunca bloquea; con la cola llena se responde `503` al instante. Una cola infinita escondería la sobrecarga y acabaría en OOM.
+- **Responder sin bloquear**: el canal de respuesta tiene buffer 1, así el secuenciador jamás se frena por un cliente lento.
+
+### Endpoints
+| Método y ruta | Uso | Códigos |
+|---|---|---|
+| `POST /orders` | `{id?, user_id, side: BUY\|SELL, price, qty}` → orden + trades | 201, 400, 409 (id repetido), 422 (sin saldo), 503 (cola llena) |
+| `DELETE /orders/{id}` | Cancela y libera la reserva | 200, 404 |
+| `GET /balances/{user}` | Saldos libre/reservado en BRL y VIB | 200 |
+| `POST /deposits` | `{user_id, brl, vib}` siembra saldos (solo para pruebas) | 204, 400 |
+| `GET /book?depth=N` | Niveles agregados de compras y ventas | 200 |
+| `GET /audit` | Verifica invariantes y totales | 200 / 500 |
+| `GET /healthz` | Liveness | 200 |
+
+Precios en **centavos**, cantidades en **unidades**. El `id` de la orden es la clave de idempotencia.
+
+### Apagado ordenado (`cmd/server`)
+SIGTERM → 1) `srv.Shutdown` deja de aceptar y espera las requests en vuelo → 2) `seq.Stop()` vacía la cola → salir.
+Ninguna orden aceptada se pierde por un deploy.
+
+### Preguntas probables
+- *¿Por qué no un lock sobre el libro?* Con locks, miles de goroutines compiten y el orden de adquisición no es el de llegada; la cola da orden explícito y evita contención.
+- *¿Qué pasa si hay más de 5.000 órdenes/s?* El secuenciador procesa ~1M/s; el límite real será red/HTTP. Si se satura, 503 con `Retry-After`, nunca pérdida silenciosa.
+- *¿Y si la API tiene varias réplicas?* Son stateless y todas hablan con el mismo secuenciador. Hoy comparten proceso; en la Fase 4 el secuenciador se alimenta de un log y la API puede separarse.
+- *¿El cliente puede reintentar sin riesgo?* Sí si envía `id`: un reintento da `409` en vez de duplicar. Limitación L2: tras un timeout no ve el resultado original (ver `DECISIONES.md`).
+- *¿Qué hace el `panic` por inconsistencia dentro del secuenciador?* Detiene el proceso; el orquestador lo reinicia y la Fase 4 reconstruye el estado desde el log.
+
 ## Próximas fases
-3. API + cola/secuenciador · 4. Persistencia/recuperación + docker-compose · 5. Observabilidad · 6. Pruebas de carga y de fallos.
+4. Persistencia/recuperación + docker-compose · 5. Observabilidad · 6. Pruebas de carga y de fallos.
