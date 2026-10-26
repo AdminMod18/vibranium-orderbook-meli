@@ -17,7 +17,7 @@ Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 | R5 | Cola de 50.000 con timeout de 2 s ⇒ órdenes que se ejecutaban tras un 504 (medido: 50 de 50) | ✅ **Corregido (D69):** se descartan sin ejecutar; cola por defecto 10.000; métrica y alerta `ExpiredCommands` |
 | R7 | Journal sin rotación, sin alerta de disco, sin réplica | ✅ **Alerta y métrica de disco (D70)** · ⏳ rotación del journal y réplica siguen en P2 (L13, L19) |
 | R8 | Interoperabilidad: los evaluadores deben fondear billeteras con `/deposits`; precios enteros en centavos | ⏳ **Pendiente de DECISIÓN:** preguntar a los evaluadores; ver el contrato en el README |
-| R9 | Rendimiento medido con fsync virtual, ≤ 100 s y generador co-ubicado | ⏳ Pendiente (P1): prueba de ≥ 30 min en disco real |
+| R9 | Rendimiento medido con fsync virtual, ≤ 100 s y generador co-ubicado | 🟡 **Parcial:** soak de 10 + 12 min con la ventana de 5 M llena (informe §2b: memoria, snapshots, crash real, reinicio de 11,8 s). Sigue pendiente ≥ 30 min en disco real y dimensionar memoria (L20) |
 
 ## Resiliencia
 

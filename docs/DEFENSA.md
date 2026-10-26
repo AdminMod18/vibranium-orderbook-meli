@@ -261,5 +261,12 @@ Cola de 8 posiciones y 512 clientes a máxima velocidad (≈32.000 req/s de pres
 - **Detalle sutil:** al reproducir el journal NO se comprueba la ventana (el journal solo contiene lo aceptado). Así cambiar el tamaño de la ventana entre reinicios nunca impide arrancar; una mutación de prueba lo demostró.
 - **Pregunta probable:** *"¿y si un bot reintenta tras la ventana?"* Se aceptaría como orden nueva (contrapartida estándar); a 5.000/s la ventana cubre ≈17 min, y un reintento real ocurre en segundos. Si el negocio exigiera más, se sube la ventana (memoria lineal) o se pasa a un almacén externo con TTL.
 
+### Resistencia (soak) con la ventana llena — lo que mostró (INFORME §2b)
+- **Qué se hizo:** 10 + 12 min a 5.000 órd/s hasta 7,5 M registros (journal 2,7 GiB) con la ventana de idempotencia en su tope de 5 M ids. Saldos auditados `ok`; el historial en Postgres coincide con el motor.
+- **Un crash real, no planeado:** el entorno se reinició a mitad de la corrida 1; la app volvió sola (snapshot + 118.183 registros, 17 s en frío) y los saldos cuadraban. Es la mejor evidencia de "qué pasa si cae".
+- **Reinicio ordenado con estado grande:** 11,8 s (snapshot de 268 MiB). Sube con el tamaño del estado: con más de ~10 M órdenes vivas habría que sacar las lecturas del secuenciador y comprimir el snapshot (L17).
+- **Lo que hay que reconocer:** en este sandbox compartido, con el estado lleno, el sistema quedó al borde de 5.000/s (p50 3,7 ms, pero p90 24 s por un atraso inicial que no se drenó), con pausas de GC/snapshot de 0,3-0,9 s y RSS de 3,7 GiB. No se oculta: se dimensiona la memoria (≥ 4 GiB, `GOMEMLIMIT`, L20) y se repite en disco real.
+- **Pregunta probable:** *"¿aguanta 5.000/s sostenido?"* → Sí, 10 min limpios (cola ≤ 5) con el estado creciendo; con 5 M ids + millones de órdenes en memoria queda justo en una máquina de 4 núcleos compartida. Lo siguiente sería sacar `GET /book` y `/audit` del hilo único y fijar límites de memoria.
+
 ## Estado
 Todas las fases completas. Pendiente solo lo operativo: añadir a los evaluadores como colaboradores del repositorio (ver PRESENTACION.md).
