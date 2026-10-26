@@ -32,6 +32,40 @@ El cuello de botella real será el I/O (log, base de datos), no el matching.
 - *¿Por qué precio del maker?* Es la convención estándar: respeta la oferta publicada y da mejora de precio al taker.
 - *¿Qué pasa si compra y venta son del mismo usuario (self-trade)?* **Pendiente de decidir**: hoy se permite; en producción se previene (wash trading).
 
+## Fase 2 — Billeteras, reservas y liquidación (`internal/wallet`, `internal/exchange`)
+
+### El problema que resuelve
+Un bot manda 1.000 compras de R$ 50 con R$ 100 de saldo. Si el saldo solo se mira al ejecutar, gasta el mismo dinero varias veces.
+**Solución: reservar al ingresar la orden.**
+
+| Evento | Efecto en la billetera |
+|---|---|
+| Orden de compra entra | `BRLFree -> BRLHeld` por `Price*Qty` |
+| Orden de venta entra | `VIBFree -> VIBHeld` por `Qty` |
+| Sin saldo libre | La orden se rechaza y **ni toca el libro** (`ErrInsufficientFunds`) |
+| Trade a precio P (cantidad q) | Comprador: sale `L*q` de lo reservado, `P*q` se paga y `(L-P)*q` vuelve a libre; recibe `q` VIB. Vendedor: sale `q` VIB reservado y recibe `P*q` BRL libre. (`L` = límite de compra) |
+| Cancelación | Se libera lo reservado de la cantidad no ejecutada |
+
+Una orden = 3 pasos en un mismo goroutine: **1) reservar, 2) cruzar, 3) liquidar**. Nadie ve estados intermedios.
+
+### Invariantes (la "prueba de que los saldos cuadran")
+1. **Conservación**: la suma de BRL y de VIB de todo el sistema nunca cambia (sin depósitos/retiros). `Ledger.Totals()`.
+2. **Sin negativos** en ninguna billetera.
+3. **Reservas == órdenes abiertas**: lo `Held` de cada usuario es exactamente `sum(Price*Remaining)` de sus compras abiertas y `sum(Remaining)` de sus ventas abiertas. `Exchange.CheckInvariants()`.
+
+`TestRandomizedConservation` los verifica tras **cada** operación de una simulación caótica (cancelaciones, parciales, rechazos).
+Esto es lo que se mostrará al evaluador al terminar su prueba de carga.
+
+### Decisiones
+- **Idempotencia por `order_id`**: un id ya procesado (aunque haya quedado FILLED y salido del libro) se rechaza (`ErrDuplicateOrder`). Un reintento del cliente no duplica una orden. En Fase 4 este set pasa a persistirse.
+- **Liquidación que falla = `panic`**: si `Settle` detecta una inconsistencia es un bug, no un error de usuario. Es preferible detener el proceso (y recuperarlo desde el log) a seguir con saldos corruptos. `Settle` comprueba precondiciones antes de mutar, nunca deja una liquidación a medias.
+- **Self-trade**: permitido y consistente (el patrimonio no cambia, hay test). Prevenirlo es una mejora de producto (anti wash-trading).
+- **Sin fees** en el MVP. Se añadirían como una tercera pata en `Settle` hacia una cuenta de la plataforma.
+
+### Preguntas probables
+- *¿Y si el servicio muere entre reservar y cruzar?* Hoy todo es memoria, no hay estado a medias. En Fase 4 el log de órdenes es la fuente de verdad: al reiniciar se reproduce y se reconstruye libro y saldos de forma determinista.
+- *¿Por qué reservar y no validar al ejecutar?* Porque una orden puede esperar en el libro minutos; sin reserva, otras órdenes gastarían ese saldo y el trade fallaría en la liquidación.
+- *¿Por qué devolver la diferencia al comprador?* Reservó a su límite pero pagó el precio del maker.
+
 ## Próximas fases
-2. Billeteras, reserva de fondos y liquidación · 3. API + cola · 4. Persistencia/recuperación + docker-compose ·
-5. Observabilidad · 6. Pruebas de carga y de fallos.
+3. API + cola/secuenciador · 4. Persistencia/recuperación + docker-compose · 5. Observabilidad · 6. Pruebas de carga y de fallos.

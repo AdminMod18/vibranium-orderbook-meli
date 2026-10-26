@@ -7,4 +7,4 @@ go test -race ./...                                   # tests
 go test ./internal/engine -bench Submit -benchmem     # rendimiento del matching
 ```
 
-Estado: **Fase 1 completa** (motor de matching). Ver [docs/DEFENSA.md](docs/DEFENSA.md) para el diseño y sus motivos.
+Estado: **Fases 1-2 completas** (motor de matching, billeteras con reserva de fondos y liquidación). Ver [docs/DEFENSA.md](docs/DEFENSA.md) para el diseño y sus motivos.
