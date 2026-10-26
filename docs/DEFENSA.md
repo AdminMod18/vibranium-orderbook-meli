@@ -129,7 +129,7 @@ Ninguna orden aceptada se pierde por un deploy.
 ### Qué pasa si falla...
 | Falla | Efecto | Cómo se recupera |
 |---|---|---|
-| Se cae el proceso (`kill -9`, OOM) | Se pierde la memoria, no el journal | Reinicio: replay (~ms por miles de registros). Probado en `scripts/drill-kill9.sh` |
+| Se cae el proceso (`kill -9`, OOM) | Se pierde la memoria, no el journal | Reinicio: snapshot + cola (~1 s) o replay completo (~7-9 s por millón de registros). Probado en `scripts/drill-kill9.sh` |
 | Corte de energía a mitad de escritura | Registro final incompleto | CRC lo detecta, se descarta esa cola; esas órdenes nunca se confirmaron |
 | Falla `write`/`fsync` (disco lleno/dañado) | No se puede garantizar durabilidad | `panic` (fail-stop): mejor caído que mentir; se reinicia desde lo durable |
 | Corrupción real del journal | Estado dudoso | El servidor se niega a arrancar y avisa; requiere intervención humana |
@@ -146,7 +146,7 @@ Ninguna orden aceptada se pierde por un deploy.
 - *¿Y por qué no Kafka?* Es el siguiente paso natural (mismo patrón, log replicado), pero para un MVP es overengineering. El journal está detrás de una interfaz pequeña (`Append/Sync/Reader`) para poder cambiarlo; ver `MEJORAS.md`.
 - *¿Qué garantiza que el replay dé lo mismo?* Determinismo: sin reloj, sin aleatoriedad, un solo hilo, ids asignados por la API y guardados en el log; y la verificación trade a trade.
 - *¿`fsync` por lote no retrasa?* Los comandos del lote esperan unos ms, pero el throughput sube órdenes de magnitud; la latencia es la de un fsync, no la de N.
-- *¿Cuánto tarda recuperar con mucho histórico?* Lineal en el tamaño del log (~1-3 s por millón de registros). Con snapshots + rotación sería constante; está en el backlog por ser una optimización.
+- *¿Cuánto tarda recuperar con mucho histórico?* Sin snapshot es lineal: **medido 7 s para 816.904 registros** (≈110.000 registros/s). Con snapshot + cola: **~1 s**, y depende del tamaño del estado, no del historial (ver Fase 6).
 
 ## Fase 4b — Historial y trazabilidad (`internal/history`)
 
@@ -207,5 +207,50 @@ Detalle completo, catálogo de métricas, alertas y mini-runbook en [OBSERVABILI
 - *¿Mediste 5.000 órdenes/s?* Sí, con generador open-loop (sin coordinated omission): 150.000 órdenes, 100 % aceptadas, p99 16-29 ms en condiciones limpias, saldos auditados. Con otra actividad pesada en la misma máquina las colas empeoran; lo digo y lo documento en lugar de ocultarlo.
 - *¿Y los logs?* JSON, con `request_id`; solo anomalías a `warn` para no ahogar el sistema a 5.000 req/s.
 
-## Próximas fases
-6. Cierre: informe de pruebas de carga y fallos, perfilado con `pprof` si hace falta, y guion de la presentación.
+## Fase 6 — Escala, recuperación acotada y cierre
+
+Informe completo y reproducible: [INFORME_PRUEBAS.md](INFORME_PRUEBAS.md). Guion de la presentación: [PRESENTACION.md](PRESENTACION.md).
+
+### Hallazgo central: el motor secuencial NO es el cuello de botella
+Perfil de CPU de la app a 8.000 órdenes/s (12 s, 13,3 s de CPU):
+
+| Componente | CPU | % |
+|---|---|---|
+| **Matching + billeteras** (`PlaceOrder`) | 0,31 s | **2,3 %** |
+| Escritura/fsync del journal | 1,88 s | 14 % |
+| JSON | 1,76 s | 13 % |
+| HTTP y red (`net/http`) | 4,40 s | 33 % |
+| Recolector de basura | 1,83 s | 14 % |
+
+**Cómo contarlo:** "serializar el matching en un hilo es barato porque el matching cuesta microsegundos; lo caro es red, JSON y disco, y eso sí escala: las APIs son stateless (N réplicas) y el fsync se amortiza con group commit."
+
+### Capacidad (máquina de 4 núcleos compartida con generador, Postgres, Prometheus y Grafana)
+Escalón de carga, todas las órdenes aceptadas y saldos auditados en cada uno:
+
+| Objetivo | Efectivas | p50 | p99 | Cola (máx.) | CPU app / Postgres / generador |
+|---|---|---|---|---|---|
+| 5.000/s | 5.000 | 1,2 ms | **16 ms** | – | 1,3 / 0,7 / 0,65 núcleos |
+| 8.000/s | 8.000 | 1,5 ms | 146-200 ms | 16 | 1,3 / 1,0 / 0,8 |
+| 12.000/s | 11.991 | 2,8 ms | 199 ms | 16 | 1,5 / 0,9 / 1,0 |
+| 16.000/s | 15.995 | 9,1 ms | 140 ms | 22 | 1,5 / 0,8 / 1,0 |
+
+**Lectura:** el sistema sostuvo **3,2× el objetivo** sin rechazar nada. La cola del secuenciador casi no se usa (máx. 22 de 50.000): el límite es el CPU **total de la máquina** (las 4 CPU casi llenas), no el matching. En producción Postgres, la API y el generador estarían en máquinas distintas. El p99 sube a partir de ~8.000/s por saturación de CPU, no por diseño.
+
+### Sobrecarga: backpressure en acción (`scripts/drill-overload.sh`)
+Cola de 8 posiciones y 512 clientes a máxima velocidad (≈32.000 req/s de presión): **307.282 rechazadas con 503, 50.601 aceptadas**; saldos auditados `ok`; tras el reinicio se recuperó todo lo aceptado con totales idénticos. Se rechaza rápido y explícito, nunca se pierde ni se descuadra nada.
+
+### Recuperación acotada con snapshots
+- **Problema descubierto midiendo:** replay completo ≈ 110.000 registros/s ⇒ **7 s por 816.904 registros** (yo había escrito "1-3 s por millón" sin medir). A 5.000/s son ~3 min por millón: el reinicio crecía sin límite.
+- **Solución:** snapshot + cola. Resultado sobre el mismo journal: **7,06 s → 1,10 s** (crash) y **1,02 s** (apagado ordenado).
+- **Seguridad:** el snapshot es una optimización, nunca la verdad. Si no sirve (corrupto, truncado, de otro journal, offset inválido, estado inconsistente) se ignora y se reproduce todo: 6 casos probados, todos llegan al mismo estado.
+- **Coste honesto:** una pausa del secuenciador de ~25-35 ms al copiar el estado (hasta ~120 ms con contención) con 800.000 ids; y el conjunto de ids vistos crece sin límite (L12). Ambos se acotarían con una ventana de idempotencia con TTL.
+
+### Preguntas probables
+- *¿Y si el reinicio tarda mucho?* Snapshots cada 200.000 registros + uno final al apagar: ~1 s. Sin snapshot, ~7-9 s por millón de registros.
+- *¿Qué pasa si el snapshot está corrupto?* Se ignora y se reproduce el journal: el snapshot nunca es la verdad.
+- *¿Cuánto escala?* 16.000 órdenes/s medidas (3,2× el objetivo) en una máquina de 4 núcleos compartida; el matching usa el 2,3 % del CPU. Más allá: particionar por instrumento y separar API/secuenciador.
+- *¿Qué pasa con días de operación?* Honestamente: el conjunto de ids vistos y el journal crecen sin límite (L12/L13). Plan: ventana de idempotencia con TTL y rotación de segmentos aprovechando los snapshots.
+- *¿Cómo sabes que funciona?* `./scripts/verify-all.sh`: tests con race detector, smoke de 22 comprobaciones, carga a 5.000/s y 4 drills, con tabla PASS/FAIL.
+
+## Estado
+Todas las fases completas. Pendiente solo lo operativo: añadir a los evaluadores como colaboradores del repositorio (ver PRESENTACION.md).

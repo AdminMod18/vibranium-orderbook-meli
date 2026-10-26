@@ -19,6 +19,7 @@ import (
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/engine"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/exchange"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/journal"
+	"github.com/AdminMod18/vibranium-orderbook-meli/internal/snapshot"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/wallet"
 )
 
@@ -45,12 +46,14 @@ type Observer interface {
 type command func(*exchange.Exchange) (rec *journal.Record, reply func())
 
 type Sequencer struct {
-	ex   *exchange.Exchange
-	jr   *journal.Journal // nil = sin persistencia (tests)
-	obs  Observer         // nil = sin métricas
-	in   chan command
-	quit chan struct{}
-	done chan struct{}
+	ex        *exchange.Exchange
+	jr        *journal.Journal // nil = sin persistencia (tests)
+	obs       Observer         // nil = sin métricas
+	snap      *snapshot.Writer // nil = sin snapshots
+	snapEvery uint64           // cada cuántos registros del journal se toma un snapshot
+	in        chan command
+	quit      chan struct{}
+	done      chan struct{}
 
 	processed atomic.Uint64
 	rejected  atomic.Uint64 // rechazadas por cola llena
@@ -63,6 +66,12 @@ type Option func(*Sequencer)
 // WithJournal activa la persistencia: cada comando que cambia estado se registra y se
 // confirma con group commit.
 func WithJournal(j *journal.Journal) Option { return func(s *Sequencer) { s.jr = j } }
+
+// WithSnapshots activa los snapshots periódicos (cada "every" registros) y uno final al detenerse.
+// Acotan el tiempo de arranque: se recupera snapshot + cola en vez de todo el journal.
+func WithSnapshots(w *snapshot.Writer, every uint64) Option {
+	return func(s *Sequencer) { s.snap, s.snapEvery = w, every }
+}
 
 // WithObserver activa la emisión de mediciones internas.
 func WithObserver(o Observer) Option { return func(s *Sequencer) { s.obs = o } }
@@ -97,6 +106,7 @@ func (s *Sequencer) run() {
 				case cmd := <-s.in:
 					s.processBatch(append(batch[:0], cmd), &replies)
 				default:
+					s.finalSnapshot()
 					return
 				}
 			}
@@ -112,6 +122,29 @@ func (s *Sequencer) run() {
 			}
 		}
 		s.processBatch(batch, &replies)
+	}
+}
+
+// maybeSnapshot toma un snapshot si pasaron "snapEvery" registros desde el último. Solo COPIA el
+// estado aquí (breve pausa); la escritura a disco ocurre en otro goroutine.
+func (s *Sequencer) maybeSnapshot() {
+	if s.snap == nil || s.jr == nil || s.snapEvery == 0 {
+		return
+	}
+	if seq := s.jr.LastSeq(); seq-s.snap.LastSeq() >= s.snapEvery {
+		s.snap.Async(s.ex, seq, s.jr.Bytes())
+	}
+}
+
+// finalSnapshot deja un snapshot al día en el apagado ordenado: el siguiente arranque es casi instantáneo.
+func (s *Sequencer) finalSnapshot() {
+	if s.snap == nil || s.jr == nil || s.snapEvery == 0 {
+		return
+	}
+	if seq := s.jr.LastSeq(); seq > s.snap.LastSeq() {
+		s.snap.Sync(s.ex, seq, s.jr.Bytes())
+	} else {
+		s.snap.Wait()
 	}
 }
 
@@ -148,6 +181,7 @@ func (s *Sequencer) processBatch(batch []command, replies *[]func()) {
 	}
 	s.processed.Add(uint64(len(batch)))
 	s.batches.Add(1)
+	s.maybeSnapshot()
 }
 
 // Stop detiene el secuenciador tras vaciar la cola. Debe llamarse DESPUÉS de dejar de

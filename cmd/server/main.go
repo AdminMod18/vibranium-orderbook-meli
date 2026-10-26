@@ -8,16 +8,18 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/api"
-	"github.com/AdminMod18/vibranium-orderbook-meli/internal/exchange"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/history"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/journal"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/metrics"
+	"github.com/AdminMod18/vibranium-orderbook-meli/internal/recovery"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/sequencer"
+	"github.com/AdminMod18/vibranium-orderbook-meli/internal/snapshot"
 )
 
 func envInt(key string, def int) int {
@@ -51,24 +53,43 @@ func main() {
 	addr := ":" + strconv.Itoa(envInt("PORT", 8080))
 	queueSize := envInt("QUEUE_SIZE", 50_000)
 
-	// Recuperación: reproducir el journal reconstruye libro y billeteras exactamente como estaban.
+	// Recuperación: snapshot + cola del journal (o el journal completo si no hay snapshot utilizable).
 	journalPath := envStr("JOURNAL_PATH", "data/journal.log")
-	ex := exchange.New()
-	t0 := time.Now()
-	jr, stats, err := journal.Recover(journalPath, journal.Options{NoSync: os.Getenv("JOURNAL_NOSYNC") == "1"},
-		func(r journal.Record) error { return journal.Apply(ex, r) })
+	snapEvery := 200_000 // registros entre snapshots; SNAPSHOT_EVERY=0 los desactiva
+	if v, err := strconv.Atoi(os.Getenv("SNAPSHOT_EVERY")); err == nil && v >= 0 {
+		snapEvery = v
+	}
+	snapPath := ""
+	if snapEvery > 0 {
+		snapPath = envStr("SNAPSHOT_PATH", filepath.Join(filepath.Dir(journalPath), "snapshot.bin"))
+	}
+	ex, jr, rep, err := recovery.Recover(journalPath, snapPath, journal.Options{NoSync: os.Getenv("JOURNAL_NOSYNC") == "1"}, log)
 	if err != nil {
-		log.Error("no se pudo recuperar el journal; se aborta para no operar con estado inválido", "err", err)
+		log.Error("no se pudo recuperar; se aborta para no operar con estado inválido", "err", err)
 		os.Exit(1)
 	}
-	if err := ex.CheckInvariants(); err != nil {
-		log.Error("invariantes rotos tras recuperar", "err", err)
-		os.Exit(1)
-	}
-	log.Info("journal recuperado", "path", journalPath, "records", stats.Records, "last_seq", stats.LastSeq,
-		"truncated_bytes", stats.TruncatedBytes, "took", time.Since(t0).String())
+	log.Info("recuperación completa", "path", journalPath, "desde_snapshot", rep.FromSnapshot, "snapshot_seq", rep.SnapshotSeq,
+		"registros_reproducidos", rep.Replayed, "last_seq", rep.LastSeq, "truncated_bytes", rep.TruncatedBytes, "took", rep.Took.String())
+	met.GaugeFunc("recovery_seconds", "Duración de la última recuperación al arrancar.", func() float64 { return rep.Took.Seconds() })
+	met.GaugeFunc("recovery_replayed_records", "Registros del journal reproducidos al arrancar.", func() float64 { return float64(rep.Replayed) })
 
-	seq := sequencer.New(ex, queueSize, sequencer.WithJournal(jr), sequencer.WithObserver(met))
+	opts := []sequencer.Option{sequencer.WithJournal(jr), sequencer.WithObserver(met)}
+	if snapEvery > 0 {
+		id, err := journal.ReadID(journalPath)
+		if err != nil {
+			log.Error("no se pudo leer la identidad del journal", "err", err)
+			os.Exit(1)
+		}
+		w := &snapshot.Writer{Path: snapPath, JournalID: id}
+		w.SetBaseline(rep.SnapshotSeq)
+		opts = append(opts, sequencer.WithSnapshots(w, uint64(snapEvery)))
+		met.GaugeFunc("snapshot_last_seq", "Último registro cubierto por el snapshot.", func() float64 { return float64(w.LastSeq()) })
+		met.GaugeFunc("snapshot_age_records", "Registros del journal posteriores al último snapshot (lo que habría que reproducir).", func() float64 { return float64(int64(jr.LastSeq()) - int64(w.LastSeq())) })
+		met.GaugeFunc("snapshot_write_seconds", "Duración de la última escritura de snapshot.", w.WriteSeconds)
+		met.GaugeFunc("snapshot_pause_seconds", "Pausa del secuenciador al copiar el estado en el último snapshot.", w.PauseSeconds)
+		met.CounterFunc("snapshot_failures_total", "Snapshots que fallaron al escribirse.", func() float64 { return float64(w.Failures()) })
+	}
+	seq := sequencer.New(ex, queueSize, opts...)
 
 	// Medidores "vivos": se leen en cada scrape de Prometheus.
 	met.GaugeFunc("queue_depth", "Comandos esperando en la cola del secuenciador.", func() float64 { return float64(seq.QueueLen()) })

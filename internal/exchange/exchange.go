@@ -20,6 +20,10 @@ type Exchange struct {
 	book   *engine.Book
 	ledger *wallet.Ledger
 	seen   map[string]struct{} // ids ya procesados: un reintento no puede duplicar una orden
+
+	// Total depositado en el sistema. Como los trades solo MUEVEN valor entre billeteras, la suma de
+	// todos los saldos debe ser SIEMPRE igual a estos totales (invariante de conservación).
+	depBRL, depVIB int64
 }
 
 func New() *Exchange {
@@ -31,7 +35,12 @@ func New() *Exchange {
 }
 
 func (x *Exchange) Deposit(user string, brl, vib int64) error {
-	return x.ledger.Deposit(user, brl, vib)
+	if err := x.ledger.Deposit(user, brl, vib); err != nil {
+		return err
+	}
+	x.depBRL += brl
+	x.depVIB += vib
+	return nil
 }
 
 func (x *Exchange) Balance(user string) wallet.Account { return x.ledger.Get(user) }
@@ -89,10 +98,12 @@ func (x *Exchange) Cancel(orderID string) (domain.Order, error) {
 
 // CheckInvariants audita el sistema completo. Es la "prueba de que los saldos cuadran":
 //  1. nadie tiene saldos negativos,
-//  2. lo reservado de cada usuario == lo que comprometen sus órdenes abiertas.
-//
-// (La conservación de totales se comprueba comparando ledger.Totals() antes y después.)
+//  2. lo reservado de cada usuario == lo que comprometen sus órdenes abiertas,
+//  3. CONSERVACIÓN: la suma de todos los saldos == total depositado (no se crea ni se destruye valor).
 func (x *Exchange) CheckInvariants() error {
+	if brl, vib := x.ledger.Totals(); brl != x.depBRL || vib != x.depVIB {
+		return fmt.Errorf("no se conserva el valor: saldos BRL=%d VIB=%d vs depositado BRL=%d VIB=%d", brl, vib, x.depBRL, x.depVIB)
+	}
 	wantBRL := map[string]int64{}
 	wantVIB := map[string]int64{}
 	for _, o := range x.book.RestingOrders() {

@@ -155,3 +155,81 @@ func TestRandomizedConservation(t *testing.T) {
 	}
 	t.Logf("órdenes rechazadas por saldo: %d de 8000", rejected)
 }
+
+// Un exchange restaurado desde una captura debe comportarse EXACTAMENTE igual que el original
+// ante las mismas operaciones futuras (mismos trades, mismo orden de prioridad, mismos saldos).
+func TestCaptureRestoreBehavesIdentically(t *testing.T) {
+	rng := rand.New(rand.NewSource(11))
+	a := New()
+	const users = 20
+	for i := 0; i < users; i++ {
+		_ = a.Deposit(fmt.Sprintf("u%d", i), 200_000, 400)
+	}
+	step := func(x *Exchange, i int, r *rand.Rand) string {
+		side := domain.Buy
+		if r.Intn(2) == 0 {
+			side = domain.Sell
+		}
+		o := ord(fmt.Sprintf("o%d", i), fmt.Sprintf("u%d", r.Intn(users)), side, domain.Price(95+r.Intn(11)), domain.Qty(1+r.Intn(15)))
+		if r.Intn(9) == 0 && i > 0 {
+			_, _ = x.Cancel(fmt.Sprintf("o%d", r.Intn(i)))
+		}
+		res, err := x.PlaceOrder(o)
+		return fmt.Sprintf("%v|%+v", err, res)
+	}
+	for i := 0; i < 3000; i++ {
+		step(a, i, rng)
+	}
+
+	b, err := Restore(a.Capture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// mismas operaciones futuras sobre ambos, con generadores idénticos
+	ra, rb := rand.New(rand.NewSource(99)), rand.New(rand.NewSource(99))
+	for i := 3000; i < 6000; i++ {
+		if ga, gb := step(a, i, ra), step(b, i, rb); ga != gb {
+			t.Fatalf("op %d: el restaurado se comporta distinto:\n original: %s\nrestaurado: %s", i, ga, gb)
+		}
+	}
+	for i := 0; i < users; i++ {
+		u := fmt.Sprintf("u%d", i)
+		if a.Balance(u) != b.Balance(u) {
+			t.Fatalf("saldos distintos para %s", u)
+		}
+	}
+	if err := b.CheckInvariants(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRestoreRejectsInconsistentState(t *testing.T) {
+	x := newEx(t, map[string][2]int64{"alice": {1000, 0}})
+	place(t, x, ord("b1", "alice", domain.Buy, 100, 5))
+
+	s := x.Capture()
+	s.Accounts["alice"] = wallet.Account{BRLFree: 1000} // reserva borrada: ya no cuadra con la orden abierta
+	if _, err := Restore(s); err == nil {
+		t.Fatal("un snapshot con reservas inconsistentes debe rechazarse")
+	}
+	s = x.Capture()
+	s.Seen = nil // orden en el libro que no figura como vista
+	if _, err := Restore(s); err == nil {
+		t.Fatal("debe rechazarse una orden abierta que no figura en los ids vistos")
+	}
+}
+
+func TestInvariantDetectsValueCreatedOrDestroyed(t *testing.T) {
+	x := newEx(t, map[string][2]int64{"alice": {1000, 5}, "bob": {500, 0}})
+	place(t, x, ord("b1", "alice", domain.Buy, 10, 3))
+	if err := x.CheckInvariants(); err != nil {
+		t.Fatal(err)
+	}
+	// Si por un bug aparece dinero de la nada, la auditoría debe saltar:
+	if err := x.Ledger().Deposit("mallory", 1, 0); err != nil { // acredita SIN pasar por Exchange.Deposit
+		t.Fatal(err)
+	}
+	if err := x.CheckInvariants(); err == nil {
+		t.Fatal("debe detectarse valor creado fuera de un depósito registrado")
+	}
+}

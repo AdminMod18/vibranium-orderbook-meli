@@ -59,6 +59,18 @@ curl localhost:8080/audit/history/alice        # saldo del motor vs recalculado 
 ```
 Precios en **centavos** de real; cantidades en **unidades** de Vibranium.
 
+## 2b) Todo de una vez
+```bash
+./scripts/verify-all.sh      # tests + stack desde cero + smoke + carga a 5.000/s + 4 drills; termina con una tabla PASS/FAIL
+```
+**Atención:** reinicia el stack y **borra los datos locales** (`down -v`). Con `SKIP_GO=1` se omiten los pasos que requieren Go.
+
+## 2c) Ensayar la demo
+```bash
+docker compose down -v && docker compose up -d   # libro vacío
+./scripts/demo.sh                                  # Enter para avanzar paso a paso (DEMO_AUTO=1 para ensayar sin pausas)
+```
+
 ## 3) Pruebas de resiliencia ("¿qué pasa si falla X?")
 Con el stack arriba:
 ```bash
@@ -68,6 +80,7 @@ Con el stack arriba:
 Los drills de arriba usan Docker + `curl`. Este otro necesita **Go** instalado:
 ```bash
 ./scripts/drill-kill9.sh               # kill -9 al servidor (sin Docker) y verificación de saldos
+./scripts/drill-overload.sh            # sobrecarga: cola diminuta + 512 clientes => 503, sin perder nada
 go test -race ./...                    # toda la batería de tests
 ```
 > En Docker Desktop el proceso de la app vive dentro de una VM: el drill usa `docker kill` y reinicia a mano
@@ -86,5 +99,6 @@ docker compose down -v     # borra TODO (journal e historial): empieza de cero
 | `port is already allocated` | Otro programa usa 8080/5432: ciérralo o cambia el puerto en `docker-compose.yml` |
 | `cannot connect to the Docker daemon` | Docker Desktop no está abierto |
 | Scripts fallan con `\r: command not found` | Saltos de línea CRLF; ver nota arriba |
+| La demo o el smoke dicen "el libro NO está vacío" | Quedaron órdenes de pruebas de carga o drills: `docker compose down -v && docker compose up -d` |
 | La app queda `unhealthy` | `docker compose logs orderbook` (los logs son JSON, una línea por evento) |
 | `GET /orders/{id}` da 404 recién creada la orden | El historial es eventualmente consistente (ms); reintenta |

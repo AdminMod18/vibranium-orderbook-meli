@@ -1000,7 +1000,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 44,
+    "y": 52,
     "w": 24,
     "h": 6
    },
@@ -1037,6 +1037,92 @@
      }
     },
     "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   }
+  },
+  {
+   "id": 18,
+   "type": "timeseries",
+   "title": "Snapshots y tiempo de reinicio",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Registros posteriores al último snapshot = lo que habría que reproducir al arrancar (≈ 8 s por millón). La pausa es lo que se detiene el secuenciador al copiar el estado; la escritura a disco ocurre en segundo plano.",
+   "gridPos": {
+    "x": 0,
+    "y": 44,
+    "w": 24,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_snapshot_age_records",
+     "legendFormat": "registros por reproducir en un reinicio",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "orderbook_snapshot_pause_seconds",
+     "legendFormat": "pausa del secuenciador (s)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    },
+    {
+     "refId": "C",
+     "expr": "orderbook_snapshot_write_seconds",
+     "legendFormat": "escritura en segundo plano (s)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "stacking": {
+       "mode": "none"
+      }
+     },
+     "min": 0
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byRegexp",
+       "options": ".*\\(s\\)|escritura.*"
+      },
+      "properties": [
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       },
+       {
+        "id": "unit",
+        "value": "s"
+       }
+      ]
+     }
+    ]
    },
    "options": {
     "legend": {

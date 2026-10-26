@@ -62,3 +62,18 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "El historial atrasa más de 10.000 registros"
+
+      - alert: SnapshotFailing
+        expr: increase(orderbook_snapshot_failures_total[10m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "Falló la escritura de un snapshot"
+          description: "No se pierde nada (el journal es la fuente de verdad) pero el próximo reinicio sería lento. Revisar disco y permisos."
+
+      - alert: SnapshotStale
+        expr: orderbook_snapshot_age_records > 1000000
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "El último snapshot tiene más de 1.000.000 de registros de antigüedad"
+          description: "Un reinicio ahora tendría que reproducir esa cola (~8 s por millón de registros)."

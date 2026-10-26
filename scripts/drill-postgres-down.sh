@@ -15,11 +15,19 @@ pg_reset() {
 }
 pg_reset >/dev/null 2>&1
 
-WORK=$(mktemp -d); trap 'kill "$(cat "$WORK/pid" 2>/dev/null)" 2>/dev/null || true; rm -rf "$WORK"' EXIT
+WORK=$(mktemp -d)
+cleanup() { # espera a que el servidor termine (escribe su snapshot final) ANTES de borrar; conserva el código de salida real
+  local rc=$? pid; pid=$(cat "$WORK/pid" 2>/dev/null || true)
+  if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done; fi
+  rm -rf "$WORK" 2>/dev/null || true
+  exit $rc
+}
+trap cleanup EXIT
 export PORT=${PORT:-18082} JOURNAL_PATH="$WORK/journal.log" DATABASE_URL
 EXE=""; [ "$(go env GOOS)" = windows ] && EXE=".exe"   # Go no añade .exe solo
 go build -o "$WORK/server$EXE" ./cmd/server
-"$WORK/server$EXE" >"$WORK/server.log" 2>&1 & echo $! >"$WORK/pid"; sleep 1.5
+wait_ready() { for _ in $(seq 1 100); do curl -s -o /dev/null "localhost:$PORT/healthz" && return 0; sleep 0.2; done; echo "el servidor no arrancó a tiempo"; return 1; }
+"$WORK/server$EXE" >"$WORK/server.log" 2>&1 & echo $! >"$WORK/pid"; wait_ready
 api() { curl -s "localhost:$PORT$1" "${@:2}"; }
 order() { api /orders -XPOST -d "{\"id\":\"$1\",\"user_id\":\"$2\",\"side\":\"$3\",\"price\":100,\"qty\":$4}"; }
 

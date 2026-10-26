@@ -42,11 +42,13 @@ docker compose run --rm loadgen -rate 5000 -duration 30s
 | `orderbook_batch_exec_seconds` | ¿Cuánto cuesta el matching en memoria? (casi nada) |
 | `orderbook_journal_last_seq`, `journal_bytes`, `journal_syncs_total` | Ritmo y tamaño del journal |
 | `orderbook_projector_lag`, `projector_up`, `projector_failures_total` | ¿El historial está al día? ¿Postgres está bien? |
+| `orderbook_snapshot_age_records` / `snapshot_pause_seconds` / `snapshot_write_seconds` / `snapshot_failures_total` | ¿Cuánto habría que reproducir en un reinicio? ¿Cuánto frena el snapshot al secuenciador? |
+| `orderbook_recovery_seconds` / `recovery_replayed_records` | ¿Cuánto tardó el último arranque y qué reprodujo? |
 | `go_*`, `process_*` | Goroutines, memoria, GC, CPU, descriptores |
 
 **Cardinalidad acotada (importante en producción):** la etiqueta `route` usa el *patrón* (`GET /orders/{id}`), no la URL real; mil `order_id` distintos no crean mil series (hay un test que lo verifica).
 
-## Alertas (`ops/prometheus/alerts.yml`, 8 reglas)
+## Alertas (`ops/prometheus/alerts.yml`, 10 reglas)
 | Alerta | Condición | Significa |
 |---|---|---|
 | `OrderbookDown` | `up == 0` 30 s | La app no responde |
@@ -57,6 +59,8 @@ docker compose run --rm loadgen -rate 5000 -duration 30s
 | `ServerErrors` | hay 5xx/504 1 min | Errores reales (el 503 de backpressure se trata aparte) |
 | `ProjectorDown` | proyector no sano 1 min | El **historial** se atrasa; el **mercado no** |
 | `ProjectorLagging` | lag > 10.000 2 min | Historial muy atrasado |
+| `SnapshotFailing` | falló un snapshot en 10 min | No se pierde nada, pero el próximo reinicio sería lento |
+| `SnapshotStale` | > 1.000.000 registros sin snapshot, 5 min | Un reinicio ahora reproduciría esa cola (~8 s por millón) |
 
 Se evalúan en Prometheus y se ven en `/alerts`. En producción irían a **Alertmanager → Slack/PagerDuty** (fuera del MVP).
 
@@ -87,6 +91,18 @@ Entorno: **máquina de 4 núcleos compartida** entre el generador, la app, Postg
 
 **Lectura honesta:** las colas largas aparecieron cuando había otra actividad pesada en la misma máquina de 4 núcleos (el servidor midió 185 requests > 250 ms en la prueba con Postgres, sin que `fsync`, matching ni cola lo expliquen). Es compatible con contención de CPU del entorno, pero **no está demostrado**; hay que repetirlo en la máquina de la presentación y, si persiste, perfilar con `pprof`. Lo que sí es robusto: **ninguna orden se perdió, ningún saldo se descuadró y el sistema nunca devolvió un error**, en todas las pruebas.
 CPU a 5.000 órdenes/s: app ≈ 1,3 núcleos, Postgres ≈ 0,7, generador ≈ 0,65.
+
+## Capacidad medida (escalón de carga)
+Todas las órdenes aceptadas y saldos auditados en cada escalón; 4 núcleos compartidos con el generador, Postgres, Prometheus y Grafana.
+
+| Objetivo | p50 | p99 | Cola máx. |
+|---|---|---|---|
+| 5.000/s | 1,2 ms | 16 ms | – |
+| 8.000/s | 1,5 ms | 146-200 ms | 16 |
+| 12.000/s | 2,8 ms | 199 ms | 16 |
+| 16.000/s | 9,1 ms | 140 ms | 22 |
+
+El límite es el CPU total de la máquina (la cola casi no se usa): ver el perfil en [DEFENSA.md](DEFENSA.md#fase-6--escala-recuperación-acotada-y-cierre).
 
 ## Cómo diagnosticar (mini-runbook)
 | Síntoma en el dashboard | Mirar | Causa probable |

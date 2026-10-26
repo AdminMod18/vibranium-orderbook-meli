@@ -42,7 +42,7 @@ if ! curl -s -o /dev/null "$A/healthz"; then
 else
   echo ">> Docker la reinició sola: RestartCount=$(docker inspect -f '{{.RestartCount}}' "$CNAME")"
 fi
-docker compose logs orderbook --no-log-prefix 2>&1 | grep "journal recuperado" | tail -1 | cut -c1-220
+docker compose logs orderbook --no-log-prefix 2>&1 | { grep "recuperación completa" || true; } | tail -1 | cut -c1-260
 after=$(api /audit); echo "auditoría: $after"
 [[ "$after" == *'"ok":true'* ]] || { echo "FALLO: invariantes rotos"; exit 1; }
 [[ "$(echo "$after" | sed 's/.*"total_brl"/x/')" == "$before" ]] || { echo "FALLO: los totales cambiaron"; exit 1; }

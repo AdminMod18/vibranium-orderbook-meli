@@ -15,6 +15,13 @@ echo "1) El servicio responde"
 for i in $(seq 1 60); do [ "$(code "$A/healthz")" = 200 ] && break; sleep 1; done
 [ "$(code "$A/healthz")" = 200 ] && pass "GET /healthz = 200" || { bad "el servicio no responde en $A" "¿corrió 'docker compose up -d'?"; exit 1; }
 
+# El smoke asume un libro vacío (si hay órdenes de pruebas anteriores, los cruces no serían los esperados).
+if [[ "$(curl -s "$A/book?depth=1")" != *'"asks":[],"bids":[]'* ]]; then
+  echo "El libro NO está vacío (quedaron órdenes de pruebas de carga o drills anteriores)."
+  echo "Para una prueba limpia:  docker compose down -v && docker compose up -d   y repita."
+  exit 2
+fi
+
 echo "2) Billeteras y un cruce de órdenes"
 AL=alice-$RUN; BO=bob-$RUN
 post /deposits "{\"user_id\":\"$AL\",\"brl\":1000000}" >/dev/null
