@@ -13,7 +13,7 @@
 | **Matriz de recuperación** | Caída sin apagado ordenado, apagado ordenado, reinicios encadenados y 6 snapshots inservibles (corrupto, truncado, de otro journal, offset inválido, offset fuera de rango, estado inconsistente): **todos llegan al mismo estado** | `go test ./internal/recovery` |
 | **Smoke end-to-end** (22 comprobaciones) | El ciclo completo contra el sistema levantado: cruces, parciales, cancelación, idempotencia, saldo insuficiente, auditoría, historial, métricas, Prometheus y Grafana | `./scripts/smoke.sh` |
 | **Carga** | 5.000 órdenes/s con generador *open-loop* y auditoría de saldos al final | `docker compose run --rm loadgen -rate 5000` |
-| **4 drills de fallos** | Ver §3 | `./scripts/drill-*.sh` |
+| **5 drills** | Ver §3 | `./scripts/drill-*.sh` |
 
 Cobertura de sentencias por paquete (cada uno con sus propios tests): exchange 87,5 %, engine 85,6 %, recovery 84,6 %, sequencer 76,1 %, api 61,1 %, journal 53,1 %, snapshot 43,2 %. *(La restauración del libro vive en `engine` pero se prueba desde `exchange` y `recovery`, y Go no cuenta la cobertura entre paquetes; `history` marca 16 % porque sus tests exigen Postgres y se omiten sin `TEST_DATABASE_URL`.)*
 
@@ -43,6 +43,7 @@ Entorno: **máquina de 4 núcleos compartida** entre generador, app, Postgres, P
 | `drill-kill9.sh` | `kill -9` al servidor en plena carga | Tras reiniciar: invariantes `ok` y **totales idénticos** | ✅ (10 repeticiones bajo CPU cargada) |
 | `drill-docker-crash.sh` | `kill -9` al proceso de la app dentro del compose | Docker la reinicia solo; recupera del volumen; saldos intactos | ✅ (snapshot + cola: 110 ms) |
 | `drill-postgres-down.sh` | Se detiene Postgres en pleno uso | El matching sigue (201), el historial responde 503, y al volver se reconcilia hasta `lag=0` y coincide con el motor | ✅ |
+| `drill-idempotency.sh` | Ventana diminuta (50 ids) y reinicios con ventanas 5, 0 y 100.000 sobre el mismo journal | Reciente=409; fuera de la ventana=orden nueva; orden en el libro=409; saldos idénticos y auditoría `ok` tras cada reinicio | ✅ |
 | `drill-overload.sh` | Cola de 8 posiciones + 512 clientes a máxima velocidad | **307.282 rechazos 503** y 50.601 aceptadas; saldos `ok`; el reinicio recupera todo lo aceptado | ✅ (4 repeticiones) |
 
 **Tiempo de recuperación** (mismo journal de 816.904 registros): sin snapshot **7,06 s** · con snapshot tras crash **1,10 s** · tras apagado ordenado **1,02 s**.
@@ -58,14 +59,16 @@ Cada ítem es un defecto o una creencia errónea que **una prueba descubrió** y
 5. **Falta de una invariante de conservación.** Un snapshot con +777 reales de la nada **no se detectaba**. *Corregido:* suma de saldos == total depositado, verificada en `/audit` y al restaurar (D56).
 6. **Los drills fallaban en silencio** tras renombrar un mensaje de log (`grep` + `set -e`). Motivó `verify-all.sh`, que informa cada paso.
 7. **Un drill intermitente** (3 de 6 fallos con la máquina cargada): el servidor escribía su snapshot final al apagarse mientras el script borraba el directorio. *Corregido* esperando al proceso antes de limpiar; **10/10 y 4/4** después.
-8. **La demo y el smoke exigen un libro vacío** (si no, los cruces no son los esperados tras una prueba de carga): ahora lo comprueban, avisan cómo reiniciar y se limpian solos.
+8. **La idempotencia crecía sin límite** (≈430 M ids/día a 5.000/s). *Corregido* con una ventana (D57-D60). Al probarla aparecieron dos sutilezas: (a) un id olvidado cuya orden sigue en el libro llegaba al libro, que lo rechazaba con *otro* error (habría sido un 500), ahora se traduce a 409 sin dejar reservas colgadas; (b) **cambiar el tamaño de la ventana entre reinicios habría impedido arrancar** (`la reproducción divergió`): lo demostró una prueba de mutación y se evita no comprobando la ventana al reproducir el journal.
+9. **La demo y el smoke exigen un libro vacío** (si no, los cruces no son los esperados tras una prueba de carga): ahora lo comprueban, avisan cómo reiniciar y se limpian solos.
 
 ## 5. Limitaciones (lo que NO se probó o no es válido)
 
 - **Windows/Git Bash y Docker Desktop no se pudieron probar** (el desarrollo se hizo en Linux). Los scripts contemplan `.exe`, CRLF y PIDs ajenos, pero requieren que se ejecute `./scripts/preflight.sh` allí.
 - **El `Dockerfile` completo no se ejecutó de punta a punta** aquí (los contenedores de build no tenían salida a internet). Se verificó la compilación dentro de `golang:1.24` y el resto de la imagen por separado. Correr `docker compose up --build` en una máquina con internet.
 - **Una sola instancia y un solo disco**: no hay réplica en espera (L3, L6); un fallo del disco pierde el journal.
-- **Estado sin límite** (ids vistos, journal): L12, L13 en `DECISIONES.md`.
+- **El journal crece sin rotación** (L13 en `DECISIONES.md`): ≈150 GB/día a 5.000/s. La memoria de idempotencia sí está acotada (D57).
+- **La ventana de idempotencia no se probó con 5 M ids reales de punta a punta** en el servidor (sí en pruebas unitarias con ventanas chicas y midiendo memoria/copia con 5 M ids en un test aislado).
 - Cifras de rendimiento medidas en entorno compartido y con disco virtual (L10).
 
 ## 6. Reproducir

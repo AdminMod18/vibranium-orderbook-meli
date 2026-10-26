@@ -10,7 +10,7 @@ Libro de ofertas para negociar Vibranium (desafío técnico). Go 1.24.
 docker compose up --build        # API :8080 + Postgres :5432
 curl localhost:8080/healthz
 ./scripts/smoke.sh               # prueba de humo end-to-end
-./scripts/verify-all.sh          # TODO: tests + smoke + carga + 4 drills, con tabla PASS/FAIL
+./scripts/verify-all.sh          # TODO: tests + smoke + carga + 5 drills, con tabla PASS/FAIL
 ./scripts/demo.sh                # guion interactivo para la presentación
 ```
 
@@ -49,6 +49,7 @@ Fases 1-6 completas: motor de matching, billeteras con reserva de fondos, API + 
 ## Probar resiliencia
 ```bash
 ./scripts/drill-overload.sh        # sobrecarga: cola diminuta + 512 clientes => 503 sin perder nada
+./scripts/drill-idempotency.sh     # ventana de idempotencia: reciente=409, antiguo=nuevo, reinicio con otra ventana
 ./scripts/drill-kill9.sh          # carga concurrente -> kill -9 -> reinicio -> verifica saldos
 ./scripts/drill-postgres-down.sh   # Postgres cae en pleno uso: el matching sigue y el historial se reconcilia
 ./scripts/drill-docker-crash.sh    # crash real (kill -9 al proceso) de la app en el compose: Docker la reinicia y recupera el journal

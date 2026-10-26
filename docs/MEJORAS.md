@@ -13,7 +13,7 @@ Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 | 🔴 | ¿Qué pasa si dos instancias arrancan a la vez? | Corrompen el journal (L7) | Lock de archivo (`flock`) como mínimo; en producción *lease* en etcd/Consul (fencing token) |
 | 🟠 | ¿Qué pasa si Postgres cae? | **Probado** (`drill-postgres-down.sh`): el matching sigue, historial `503`, se reconcilia solo al volver | Alertar por *lag* del proyector (Fase 5) |
 | 🔴 | ¿Cuánto tarda en recuperarse? | **Hecho (Fase 6):** snapshot + cola ≈ 1 s; sin snapshot ≈ 7-9 s por millón de registros (medido) | Rotación de segmentos del journal y archivado de lo anterior al snapshot (L13) |
-| 🔴 | ¿Qué pasa tras días de operación? | Los ids vistos y el journal crecen sin límite (L12, L13: ≈430 M ids y ≈150 GB al día a 5.000/s) | **Ventana de idempotencia con TTL** (24 h) y rotación/archivado de segmentos |
+| 🔴 | ¿Qué pasa tras días de operación? | **Idempotencia acotada** por ventana (D57: 5 M ids ≈ 409 MiB). Queda el journal: ≈150 GB/día a 5.000/s (L13) | **Rotación de segmentos** del journal y archivado de lo anterior al último snapshot |
 | 🟠 | ¿Y si el cliente reintenta tras un timeout? | `409`, y `GET /orders/{id}` permite consultar el estado | Devolver el resultado original en el reintento idempotente (guardar el resultado por `order_id`) |
 | 🟢 | ¿Qué pasa si el proceso recibe SIGTERM? | Apagado ordenado: drena requests y cola, cierra el journal | — |
 
@@ -35,6 +35,7 @@ Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 | 🟠 | ¿Self-trade? | Permitido (D9) | Prevención configurable (cancelar taker/maker/ambos) |
 | 🟠 | ¿Órdenes market / IOC / FOK? | Solo límite (D1) | Se montan sobre el mismo `match()` |
 | 🟠 | ¿Comisiones? | No (D20) | Tercera pata en `Settle` |
+| 🟢 | ¿Y si necesito idempotencia más larga que la ventana (p. ej. 24 h)? | Se sube `IDEMPOTENCY_WINDOW` (memoria lineal ≈ 90 B/id) | Almacén externo con TTL (Redis/Postgres) para claves de idempotencia, o fingerprint de 128 bits en vez del id completo |
 | 🟢 | ¿Retiros / depósitos reales? | `POST /deposits` solo para pruebas | Servicio de wallets real con saga e idempotencia |
 
 ## Historial

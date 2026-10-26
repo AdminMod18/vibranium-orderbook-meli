@@ -19,20 +19,32 @@ var ErrDuplicateOrder = errors.New("la orden ya fue procesada")
 type Exchange struct {
 	book   *engine.Book
 	ledger *wallet.Ledger
-	seen   map[string]struct{} // ids ya procesados: un reintento no puede duplicar una orden
+	seen   *idWindow // ventana de ids ya procesados: un reintento reciente no puede duplicar una orden
 
 	// Total depositado en el sistema. Como los trades solo MUEVEN valor entre billeteras, la suma de
 	// todos los saldos debe ser SIEMPRE igual a estos totales (invariante de conservación).
 	depBRL, depVIB int64
 }
 
-func New() *Exchange {
+// New crea un exchange cuya idempotencia recuerda TODOS los ids (sin ventana). Útil en pruebas;
+// en producción se usa NewWithWindow para acotar la memoria.
+func New() *Exchange { return NewWithWindow(0) }
+
+// NewWithWindow crea un exchange que recuerda los últimos `window` ids aceptados (0 = sin límite).
+// Un reintento de una orden DENTRO de la ventana se rechaza (409); pasada la ventana se trataría
+// como una orden nueva (salvo que la original siga en el libro, que la protege por sí mismo).
+func NewWithWindow(window int) *Exchange {
 	return &Exchange{
 		book:   engine.NewBook(),
 		ledger: wallet.NewLedger(),
-		seen:   make(map[string]struct{}),
+		seen:   newIDWindow(window),
 	}
 }
+
+// SeenCount y SeenEvicted alimentan las métricas (seguros de leer desde otros goroutines).
+func (x *Exchange) SeenCount() int64    { return x.seen.size.Load() }
+func (x *Exchange) SeenEvicted() uint64 { return x.seen.evicted.Load() }
+func (x *Exchange) SeenLimit() int      { return x.seen.limit }
 
 func (x *Exchange) Deposit(user string, brl, vib int64) error {
 	if err := x.ledger.Deposit(user, brl, vib); err != nil {
@@ -49,12 +61,19 @@ func (x *Exchange) Book() *engine.Book { return x.book }
 
 func (x *Exchange) Ledger() *wallet.Ledger { return x.ledger }
 
-// PlaceOrder procesa una orden límite de compra o venta.
-func (x *Exchange) PlaceOrder(o domain.Order) (engine.Result, error) {
+// PlaceOrder procesa una orden límite de compra o venta (con control de idempotencia).
+func (x *Exchange) PlaceOrder(o domain.Order) (engine.Result, error) { return x.placeOrder(o, true) }
+
+// ReplayOrder reaplica una orden YA ACEPTADA que se está leyendo del journal. No comprueba la ventana
+// de idempotencia: el journal solo contiene lo que el sistema aceptó, y la ventana pudo ser distinta
+// (más chica o más grande) cuando se escribió. Así cambiar IDEMPOTENCY_WINDOW nunca impide arrancar.
+func (x *Exchange) ReplayOrder(o domain.Order) (engine.Result, error) { return x.placeOrder(o, false) }
+
+func (x *Exchange) placeOrder(o domain.Order, checkDup bool) (engine.Result, error) {
 	if err := engine.Validate(o); err != nil {
 		return engine.Result{}, err
 	}
-	if _, dup := x.seen[o.ID]; dup {
+	if checkDup && x.seen.has(o.ID) {
 		return engine.Result{}, ErrDuplicateOrder
 	}
 	if err := x.ledger.Hold(o); err != nil { // 1) sin saldo, la orden ni entra al libro
@@ -63,11 +82,15 @@ func (x *Exchange) PlaceOrder(o domain.Order) (engine.Result, error) {
 
 	res, err := x.book.Submit(o) // 2) matching
 	if err != nil {
-		// No debería ocurrir tras Validate, pero si pasa se devuelve lo reservado.
+		// Se devuelve lo reservado. Un id olvidado por la ventana pero cuya orden sigue en el libro
+		// llega hasta aquí: es el mismo caso de "orden ya procesada", con el mismo error.
 		_ = x.ledger.Release(o)
+		if checkDup && errors.Is(err, engine.ErrDuplicateOrder) {
+			return engine.Result{}, ErrDuplicateOrder
+		}
 		return engine.Result{}, err
 	}
-	x.seen[o.ID] = struct{}{}
+	x.seen.add(o.ID)
 
 	for _, t := range res.Trades { // 3) liquidación
 		// Un maker compra a su propio límite (== precio del trade). Un taker comprador

@@ -1000,7 +1000,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 52,
+    "y": 60,
     "w": 24,
     "h": 6
    },
@@ -1119,6 +1119,88 @@
        {
         "id": "unit",
         "value": "s"
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   }
+  },
+  {
+   "id": 19,
+   "type": "timeseries",
+   "title": "Ventana de idempotencia",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Ids recordados para rechazar reintentos (acotado al límite) y ids olvidados por segundo. Con el límite alcanzado la memoria deja de crecer.",
+   "gridPos": {
+    "x": 0,
+    "y": 52,
+    "w": 24,
+    "h": 6
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_idempotency_window_size",
+     "legendFormat": "ids recordados",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "orderbook_idempotency_window_limit",
+     "legendFormat": "límite",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    },
+    {
+     "refId": "C",
+     "expr": "rate(orderbook_idempotency_evicted_total[1m])",
+     "legendFormat": "ids olvidados/s",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "stacking": {
+       "mode": "none"
+      }
+     },
+     "min": 0
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "ids olvidados/s"
+      },
+      "properties": [
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
        }
       ]
      }

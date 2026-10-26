@@ -44,6 +44,7 @@ docker compose run --rm loadgen -rate 5000 -duration 30s
 | `orderbook_projector_lag`, `projector_up`, `projector_failures_total` | ¿El historial está al día? ¿Postgres está bien? |
 | `orderbook_snapshot_age_records` / `snapshot_pause_seconds` / `snapshot_write_seconds` / `snapshot_failures_total` | ¿Cuánto habría que reproducir en un reinicio? ¿Cuánto frena el snapshot al secuenciador? |
 | `orderbook_recovery_seconds` / `recovery_replayed_records` | ¿Cuánto tardó el último arranque y qué reprodujo? |
+| `orderbook_idempotency_window_size` / `_limit` / `idempotency_evicted_total` | ¿Cuántos ids recuerda la idempotencia y cuántos se olvidan? (memoria acotada) |
 | `go_*`, `process_*` | Goroutines, memoria, GC, CPU, descriptores |
 
 **Cardinalidad acotada (importante en producción):** la etiqueta `route` usa el *patrón* (`GET /orders/{id}`), no la URL real; mil `order_id` distintos no crean mil series (hay un test que lo verifica).

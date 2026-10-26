@@ -40,7 +40,8 @@ TAIL=4 step "Drill: Postgres cae en pleno uso" ./scripts/drill-postgres-down.sh
 if [ $HAVE_GO = 1 ]; then
   TAIL=4 step "Drill: kill -9 en plena carga (servidor local)" ./scripts/drill-kill9.sh
   TAIL=4 step "Drill: sobrecarga y backpressure (503)" ./scripts/drill-overload.sh
-else skip "Drills kill-9 y sobrecarga" "requieren Go"; fi
+  TAIL=6 step "Drill: idempotencia con ventana y cambio de ventana entre reinicios" ./scripts/drill-idempotency.sh
+else skip "Drills kill-9, sobrecarga e idempotencia" "requieren Go"; fi
 step "Dejar el stack limpio y operativo" reset_stack
 
 printf '\n\033[1m════════ RESUMEN ════════\033[0m\n'

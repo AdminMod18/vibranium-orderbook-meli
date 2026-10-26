@@ -243,14 +243,21 @@ Cola de 8 posiciones y 512 clientes a máxima velocidad (≈32.000 req/s de pres
 - **Problema descubierto midiendo:** replay completo ≈ 110.000 registros/s ⇒ **7 s por 816.904 registros** (yo había escrito "1-3 s por millón" sin medir). A 5.000/s son ~3 min por millón: el reinicio crecía sin límite.
 - **Solución:** snapshot + cola. Resultado sobre el mismo journal: **7,06 s → 1,10 s** (crash) y **1,02 s** (apagado ordenado).
 - **Seguridad:** el snapshot es una optimización, nunca la verdad. Si no sirve (corrupto, truncado, de otro journal, offset inválido, estado inconsistente) se ignora y se reproduce todo: 6 casos probados, todos llegan al mismo estado.
-- **Coste honesto:** una pausa del secuenciador de ~25-35 ms al copiar el estado (hasta ~120 ms con contención) con 800.000 ids; y el conjunto de ids vistos crece sin límite (L12). Ambos se acotarían con una ventana de idempotencia con TTL.
+- **Coste honesto:** el snapshot tiene una pausa breve del secuenciador al copiar el estado (ver L14); lo que lo hacía crecer, el conjunto de ids, ahora está acotado por la ventana de idempotencia (D57).
 
 ### Preguntas probables
 - *¿Y si el reinicio tarda mucho?* Snapshots cada 200.000 registros + uno final al apagar: ~1 s. Sin snapshot, ~7-9 s por millón de registros.
 - *¿Qué pasa si el snapshot está corrupto?* Se ignora y se reproduce el journal: el snapshot nunca es la verdad.
 - *¿Cuánto escala?* 16.000 órdenes/s medidas (3,2× el objetivo) en una máquina de 4 núcleos compartida; el matching usa el 2,3 % del CPU. Más allá: particionar por instrumento y separar API/secuenciador.
-- *¿Qué pasa con días de operación?* Honestamente: el conjunto de ids vistos y el journal crecen sin límite (L12/L13). Plan: ventana de idempotencia con TTL y rotación de segmentos aprovechando los snapshots.
+- *¿Qué pasa con días de operación?* La memoria de idempotencia está **acotada** por una ventana (5 M ids ≈ 409 MiB; configurable). Queda el crecimiento del journal (≈150 GB/día a 5.000/s): los snapshots ya permiten truncar lo anterior, falta implementar la rotación por segmentos (L13).
 - *¿Cómo sabes que funciona?* `./scripts/verify-all.sh`: tests con race detector, smoke de 22 comprobaciones, carga a 5.000/s y 4 drills, con tabla PASS/FAIL.
+
+### Idempotencia con ventana (`internal/exchange/idwindow.go`)
+- **Qué hace:** recuerda los últimos N ids aceptados (5 M por defecto, `IDEMPOTENCY_WINDOW`). Reintento reciente ⇒ 409. Más antiguo que la ventana ⇒ se trata como orden nueva. Si la orden **sigue en el libro**, se rechaza igual.
+- **Por qué por cantidad y no por tiempo:** depende solo de la secuencia de órdenes ⇒ el journal reconstruye lo mismo. Con reloj, un reinicio olvidaría ids distintos.
+- **Costos medidos:** ≈85-97 bytes por id; 5 M ids = 409 MiB; copiarlos para un snapshot = 19 ms.
+- **Detalle sutil:** al reproducir el journal NO se comprueba la ventana (el journal solo contiene lo aceptado). Así cambiar el tamaño de la ventana entre reinicios nunca impide arrancar; una mutación de prueba lo demostró.
+- **Pregunta probable:** *"¿y si un bot reintenta tras la ventana?"* Se aceptaría como orden nueva (contrapartida estándar); a 5.000/s la ventana cubre ≈17 min, y un reintento real ocurre en segundos. Si el negocio exigiera más, se sube la ventana (memoria lineal) o se pasa a un almacén externo con TTL.
 
 ## Estado
 Todas las fases completas. Pendiente solo lo operativo: añadir a los evaluadores como colaboradores del repositorio (ver PRESENTACION.md).
