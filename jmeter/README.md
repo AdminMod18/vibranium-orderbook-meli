@@ -31,6 +31,9 @@ visual. Está pensado para ejecutarse **solo contra un entorno de pruebas exclus
 Para la integridad financiera abra `jmeter/vibranium-integrity.jmx` y pulse Start (es de un solo hilo y dura segundos).
 Cualquiera de esos valores también se puede pasar por consola: `-Jduration=1800` tiene prioridad sobre lo que diga la tabla.
 
+**Si ve muchos errores `409 duplicate_order` en `POST /orders`:** la causa era reutilizar el identificador de la corrida al pulsar Start varias veces en la misma sesión de JMeter (las propiedades sobreviven entre ejecuciones). Ya se genera uno nuevo en **cada** Start; si aun así aparece, vuelva a abrir el `.jmx` actualizado (`git pull`) y reinicie JMeter. Para repetir con ids idénticos a propósito: `-Jrun_id_fijo=<id>`.
+**Consejos para la demo en la GUI:** no agregue un *Backend Listener* (Graphite/InfluxDB) si no tiene ese servidor (llena el log de excepciones) y deje **View Results Tree** deshabilitado o con «solo errores»: con miles de muestras por segundo consume mucha memoria y frena a JMeter.
+
 > La **interfaz gráfica es para presentar y para pruebas cortas**: JMeter recomienda correr las cargas largas en modo consola (más abajo), porque la GUI consume CPU y puede distorsionar la medición.
 
 ## Ejecutar por consola

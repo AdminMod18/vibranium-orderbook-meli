@@ -263,11 +263,13 @@ vars.put('P0', p0.toString()); vars.put('P1', p1.toString()); vars.put('BRL0', (
 """
 
 PRE_RUNID = r"""
-// Un identificador único por ejecución: evita colisiones de idempotencia entre corridas (los ids de orden se recuerdan
-// en una ventana de 5 M) y permite reconocer, y no mezclar, los datos que creó esta prueba.
-if (props.getProperty('run_id') == null || props.getProperty('run_id').isEmpty()) {
-  props.setProperty('run_id', new Date().format('yyyyMMddHHmmss') + Integer.toString(new Random().nextInt(0x10000), 16).padLeft(4, '0'))
-}
+// Un identificador único por EJECUCIÓN: evita colisiones de idempotencia (los ids de orden se recuerdan en una ventana de 5 M) y permite
+// reconocer los datos que creó esta prueba. Las propiedades de JMeter sobreviven entre ejecuciones dentro de la MISMA sesión de la GUI
+// (Start, Stop, Start...), así que NO se puede reutilizar una propiedad ya existente: se genera uno nuevo en cada ejecución, salvo que se
+// FIJE a propósito con -Jrun_id_fijo=<id> (lo hace run-jmeter.sh para poder registrar el id de la corrida).
+def fijo = props.getProperty('run_id_fijo')
+props.setProperty('run_id', (fijo != null && !fijo.isEmpty()) ? fijo :
+  new Date().format('yyyyMMddHHmmss') + Integer.toString(new Random().nextInt(0x10000), 16).padLeft(4, '0'))
 """
 
 PRE_ORDER = r"""
