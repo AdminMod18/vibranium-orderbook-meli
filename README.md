@@ -2,10 +2,14 @@
 
 Libro de ofertas para negociar Vibranium (desafío técnico). Go 1.24.
 
-## Levantar todo (Docker)
+## Levantar todo (Docker) — guía completa en [docs/EJECUTAR_LOCAL.md](docs/EJECUTAR_LOCAL.md)
+```bash
+./scripts/preflight.sh            # ¿tengo todo lo necesario?
+```
 ```bash
 docker compose up --build        # API :8080 + Postgres :5432
 curl localhost:8080/healthz
+./scripts/smoke.sh               # prueba de humo end-to-end
 ```
 
 ## Probar sin Docker

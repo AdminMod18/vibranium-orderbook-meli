@@ -2,7 +2,10 @@
 # Drill con contenedores: crash REAL de la app (kill -9 al proceso, como un OOM) en pleno uso.
 # Requiere:  docker compose up -d   (con la app sana)
 # Nota: `docker kill` cuenta como parada MANUAL y Docker no aplica la política de reinicio;
-#       por eso se mata el proceso desde el host, que es lo que ocurre en un fallo real.
+#       por eso, donde se puede, se mata el PROCESO desde el host (lo que haría un OOM real).
+#       En Docker Desktop (Windows/macOS) el proceso vive dentro de una VM y su PID no es visible
+#       desde aquí (matar ese número podría afectar a OTRO proceso): se usa `docker kill` y se
+#       reinicia a mano, que igualmente prueba la recuperación del journal desde el volumen.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 A=${API:-localhost:8080}
@@ -19,12 +22,26 @@ before=$(api /audit | sed 's/.*"total_brl"/x/')
     [ $((i % 20)) = 0 ] && wait
   done; wait ) & LOAD=$!
 sleep 0.4
-PID=$(docker inspect -f '{{.State.Pid}}' "$CNAME")
-echo ">> kill -9 al proceso de la app (pid $PID) con carga en curso"
-kill -9 "$PID"; kill $LOAD 2>/dev/null || true; wait 2>/dev/null || true
+HOST_KILL=0
+if [ "$(uname -s)" = Linux ] && ! docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -qi desktop; then HOST_KILL=1; fi
+if [ "$HOST_KILL" = 1 ]; then
+  PID=$(docker inspect -f '{{.State.Pid}}' "$CNAME")
+  echo ">> kill -9 al proceso de la app (pid $PID) con carga en curso"
+  kill -9 "$PID"
+else
+  echo ">> docker kill (SIGKILL) a la app con carga en curso  [Docker Desktop: sin kill de host]"
+  docker kill "$CNAME" >/dev/null
+fi
+kill $LOAD 2>/dev/null || true; wait 2>/dev/null || true
 
-for i in $(seq 1 60); do curl -s -o /dev/null "$A/healthz" && break; sleep 0.5; done
-echo ">> Docker la reinició: RestartCount=$(docker inspect -f '{{.RestartCount}}' "$CNAME")"
+for i in $(seq 1 30); do curl -s -o /dev/null "$A/healthz" && break; sleep 0.5; done
+if ! curl -s -o /dev/null "$A/healthz"; then
+  echo ">> (docker kill es parada manual: no hay reinicio automático) reiniciando a mano"
+  docker compose start orderbook >/dev/null
+  for i in $(seq 1 60); do curl -s -o /dev/null "$A/healthz" && break; sleep 0.5; done
+else
+  echo ">> Docker la reinició sola: RestartCount=$(docker inspect -f '{{.RestartCount}}' "$CNAME")"
+fi
 docker compose logs orderbook --no-log-prefix 2>&1 | grep "journal recuperado" | tail -1 | cut -c1-220
 after=$(api /audit); echo "auditoría: $after"
 [[ "$after" == *'"ok":true'* ]] || { echo "FALLO: invariantes rotos"; exit 1; }

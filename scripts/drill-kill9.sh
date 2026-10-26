@@ -6,9 +6,10 @@ cd "$(dirname "$0")/.."
 
 WORK=$(mktemp -d); trap 'kill "$(cat "$WORK/pid" 2>/dev/null)" 2>/dev/null || true; rm -rf "$WORK"' EXIT
 export PORT=${PORT:-18081} JOURNAL_PATH="$WORK/journal.log"
-go build -o "$WORK/server" ./cmd/server
+EXE=""; [ "$(go env GOOS)" = windows ] && EXE=".exe"   # Go no añade .exe solo
+go build -o "$WORK/server$EXE" ./cmd/server
 
-start() { "$WORK/server" >>"$WORK/server.log" 2>&1 & echo $! >"$WORK/pid"; sleep 1; }
+start() { "$WORK/server$EXE" >>"$WORK/server.log" 2>&1 & echo $! >"$WORK/pid"; sleep 1; }
 api() { curl -s "localhost:$PORT$1" "${@:2}"; }
 
 start

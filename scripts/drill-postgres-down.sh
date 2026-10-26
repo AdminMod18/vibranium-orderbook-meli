@@ -17,8 +17,9 @@ pg_reset >/dev/null 2>&1
 
 WORK=$(mktemp -d); trap 'kill "$(cat "$WORK/pid" 2>/dev/null)" 2>/dev/null || true; rm -rf "$WORK"' EXIT
 export PORT=${PORT:-18082} JOURNAL_PATH="$WORK/journal.log" DATABASE_URL
-go build -o "$WORK/server" ./cmd/server
-"$WORK/server" >"$WORK/server.log" 2>&1 & echo $! >"$WORK/pid"; sleep 1.5
+EXE=""; [ "$(go env GOOS)" = windows ] && EXE=".exe"   # Go no añade .exe solo
+go build -o "$WORK/server$EXE" ./cmd/server
+"$WORK/server$EXE" >"$WORK/server.log" 2>&1 & echo $! >"$WORK/pid"; sleep 1.5
 api() { curl -s "localhost:$PORT$1" "${@:2}"; }
 order() { api /orders -XPOST -d "{\"id\":\"$1\",\"user_id\":\"$2\",\"side\":\"$3\",\"price\":100,\"qty\":$4}"; }
 
