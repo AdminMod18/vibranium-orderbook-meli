@@ -1,58 +1,131 @@
 {
  "uid": "orderbook-overview",
- "title": "Order Book - Visión general",
+ "title": "Vibranium Order Book — Panel de control",
  "tags": [
-  "orderbook"
+  "orderbook",
+  "vibranium"
  ],
  "timezone": "browser",
  "schemaVersion": 39,
- "version": 1,
+ "version": 2,
  "refresh": "5s",
+ "editable": true,
  "time": {
   "from": "now-15m",
   "to": "now"
  },
+ "graphTooltip": 1,
+ "annotations": {
+  "list": []
+ },
+ "links": [],
+ "templating": {
+  "list": [
+   {
+    "name": "rate",
+    "label": "Ventana de cálculo",
+    "type": "custom",
+    "query": "30s,1m,5m",
+    "current": {
+     "selected": true,
+     "text": "1m",
+     "value": "1m"
+    },
+    "options": [
+     {
+      "selected": false,
+      "text": "30s",
+      "value": "30s"
+     },
+     {
+      "selected": true,
+      "text": "1m",
+      "value": "1m"
+     },
+     {
+      "selected": false,
+      "text": "5m",
+      "value": "5m"
+     }
+    ],
+    "hide": 0,
+    "description": "Ventana sobre la que se calculan las tasas por segundo y los percentiles"
+   }
+  ]
+ },
  "panels": [
   {
    "id": 1,
+   "type": "text",
+   "title": "",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 3
+   },
+   "options": {
+    "mode": "markdown",
+    "content": "**Cómo leer este panel.** Arriba: el estado del sistema de un vistazo (verde = bien, amarillo = atención, rojo = problema). Cada sección siguiente baja un nivel: tráfico → latencia → cola del secuenciador → persistencia → memoria → historial → idempotencia. Pase el cursor por el ⓘ de cada panel para ver qué mide y cómo interpretarlo. La **ventana de cálculo** de las tasas se elige arriba a la izquierda."
+   },
+   "transparent": true
+  },
+  {
+   "id": 2,
+   "type": "row",
+   "title": "1 · Estado general (de un vistazo)",
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 3,
+    "w": 24,
+    "h": 1
+   },
+   "description": "Indicadores clave: si todo está en verde, el sistema está sano."
+  },
+  {
+   "id": 3,
    "type": "stat",
-   "title": "Órdenes/s aceptadas",
-   "description": "Throughput de órdenes que entraron al libro.",
+   "title": "Órdenes aceptadas / s",
+   "description": "Órdenes que entraron al sistema y se confirmaron (201). Es el throughput útil.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
    "gridPos": {
     "x": 0,
-    "y": 0,
+    "y": 4,
     "w": 4,
     "h": 4
    },
    "targets": [
     {
      "refId": "A",
-     "expr": "sum(rate(orderbook_orders_total{result=\"accepted\"}[1m]))",
+     "expr": "sum(rate(orderbook_orders_total{result=\"accepted\"}[$rate]))",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "instant": false
+     "legendFormat": "",
+     "instant": false,
+     "range": true
     }
    ],
    "fieldConfig": {
     "defaults": {
-     "unit": "ops",
+     "unit": "reqps",
      "thresholds": {
       "mode": "absolute",
       "steps": [
        {
-        "color": "green",
+        "color": "blue",
         "value": null
        }
       ]
      },
      "mappings": [],
-     "decimals": null
+     "decimals": 0
     },
     "overrides": []
    },
@@ -60,53 +133,58 @@
     "reduceOptions": {
      "calcs": [
       "lastNotNull"
-     ]
+     ],
+     "fields": "",
+     "values": false
     },
     "colorMode": "background",
     "graphMode": "area",
-    "textMode": "auto"
+    "textMode": "value",
+    "justifyMode": "center"
    }
   },
   {
-   "id": 2,
+   "id": 4,
    "type": "stat",
-   "title": "Trades/s",
-   "description": "",
+   "title": "Trades / s",
+   "description": "Ejecuciones (cruces) por segundo.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
    "gridPos": {
     "x": 4,
-    "y": 0,
+    "y": 4,
     "w": 4,
     "h": 4
    },
    "targets": [
     {
      "refId": "A",
-     "expr": "rate(orderbook_trades_total[1m])",
+     "expr": "rate(orderbook_trades_total[$rate])",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "instant": false
+     "legendFormat": "",
+     "instant": false,
+     "range": true
     }
    ],
    "fieldConfig": {
     "defaults": {
-     "unit": "ops",
+     "unit": "reqps",
      "thresholds": {
       "mode": "absolute",
       "steps": [
        {
-        "color": "green",
+        "color": "blue",
         "value": null
        }
       ]
      },
      "mappings": [],
-     "decimals": null
+     "decimals": 0
     },
     "overrides": []
    },
@@ -114,37 +192,42 @@
     "reduceOptions": {
      "calcs": [
       "lastNotNull"
-     ]
+     ],
+     "fields": "",
+     "values": false
     },
     "colorMode": "background",
     "graphMode": "area",
-    "textMode": "auto"
+    "textMode": "value",
+    "justifyMode": "center"
    }
   },
   {
-   "id": 3,
+   "id": 5,
    "type": "stat",
    "title": "p99 POST /orders",
-   "description": "Latencia vista por el servidor.",
+   "description": "El 99 % de las órdenes se responde en menos de este tiempo (visto por el servidor). Verde < 100 ms, rojo ≥ 250 ms.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
    "gridPos": {
     "x": 8,
-    "y": 0,
+    "y": 4,
     "w": 4,
     "h": 4
    },
    "targets": [
     {
      "refId": "A",
-     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[1m])))",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[$rate])))",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "instant": false
+     "legendFormat": "",
+     "instant": false,
+     "range": true
     }
    ],
    "fieldConfig": {
@@ -158,7 +241,7 @@
         "value": null
        },
        {
-        "color": "orange",
+        "color": "yellow",
         "value": 0.1
        },
        {
@@ -168,7 +251,7 @@
       ]
      },
      "mappings": [],
-     "decimals": null
+     "decimals": 1
     },
     "overrides": []
    },
@@ -176,25 +259,154 @@
     "reduceOptions": {
      "calcs": [
       "lastNotNull"
-     ]
+     ],
+     "fields": "",
+     "values": false
     },
     "colorMode": "background",
     "graphMode": "area",
-    "textMode": "auto"
+    "textMode": "value",
+    "justifyMode": "center"
    }
   },
   {
-   "id": 4,
+   "id": 6,
    "type": "stat",
-   "title": "Ocupación de la cola",
-   "description": "Si llega al 100% se responde 503 (backpressure).",
+   "title": "Rechazos 503 / s",
+   "description": "Backpressure: la cola del secuenciador se llenó y se rechazó rápido. Distinto de cero = el sistema está saturado.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
    "gridPos": {
     "x": 12,
-    "y": 0,
+    "y": 4,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(rate(orderbook_http_requests_total{code=\"503\"}[$rate])) or vector(0)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.01
+       }
+      ]
+     },
+     "mappings": [],
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "background",
+    "graphMode": "area",
+    "textMode": "value",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 7,
+   "type": "stat",
+   "title": "Errores 5xx / s",
+   "description": "Errores del servidor distintos de 503 (incluye 504 por timeout). Debe ser siempre 0.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 4,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(rate(orderbook_http_requests_total{code=~\"5..\",code!=\"503\"}[$rate])) or vector(0)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 0.001
+       }
+      ]
+     },
+     "mappings": [],
+     "decimals": 2
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "background",
+    "graphMode": "area",
+    "textMode": "value",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 8,
+   "type": "stat",
+   "title": "Ocupación de cola",
+   "description": "Comandos esperando al secuenciador / capacidad. Cerca de 100 % empiezan los 503.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 20,
+    "y": 4,
     "w": 4,
     "h": 4
    },
@@ -206,7 +418,9 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "instant": false
+     "legendFormat": "",
+     "instant": false,
+     "range": true
     }
    ],
    "fieldConfig": {
@@ -220,7 +434,7 @@
         "value": null
        },
        {
-        "color": "orange",
+        "color": "yellow",
         "value": 0.5
        },
        {
@@ -230,7 +444,7 @@
       ]
      },
      "mappings": [],
-     "decimals": null
+     "decimals": 2
     },
     "overrides": []
    },
@@ -238,25 +452,221 @@
     "reduceOptions": {
      "calcs": [
       "lastNotNull"
-     ]
+     ],
+     "fields": "",
+     "values": false
     },
     "colorMode": "background",
     "graphMode": "area",
-    "textMode": "auto"
+    "textMode": "value",
+    "justifyMode": "center"
    }
   },
   {
-   "id": 5,
+   "id": 9,
    "type": "stat",
-   "title": "Lag del historial",
-   "description": "Registros del journal aún no reflejados en Postgres.",
+   "title": "p50 POST /orders",
+   "description": "La mitad de las órdenes se responde en menos de esto.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
    "gridPos": {
-    "x": 16,
-    "y": 0,
+    "x": 0,
+    "y": 8,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 0.025
+       },
+       {
+        "color": "red",
+        "value": 0.1
+       }
+      ]
+     },
+     "mappings": [],
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "background",
+    "graphMode": "area",
+    "textMode": "value",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 10,
+   "type": "stat",
+   "title": "p95 POST /orders",
+   "description": "El 95 % de las órdenes se responde en menos de esto.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 4,
+    "y": 8,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 0.05
+       },
+       {
+        "color": "red",
+        "value": 0.2
+       }
+      ]
+     },
+     "mappings": [],
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "background",
+    "graphMode": "area",
+    "textMode": "value",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 11,
+   "type": "stat",
+   "title": "Cancelaciones / s",
+   "description": "Cancelaciones de órdenes (exitosas o no).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 8,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(rate(orderbook_cancels_total[$rate])) or vector(0)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "blue",
+        "value": null
+       }
+      ]
+     },
+     "mappings": [],
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "background",
+    "graphMode": "area",
+    "textMode": "value",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 12,
+   "type": "stat",
+   "title": "Lag del historial",
+   "description": "Registros del journal que Postgres aún no refleja. Alto = el historial va atrasado (el matching NO se ve afectado).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 8,
     "w": 4,
     "h": 4
    },
@@ -268,7 +678,9 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "instant": false
+     "legendFormat": "",
+     "instant": false,
+     "range": true
     }
    ],
    "fieldConfig": {
@@ -282,17 +694,16 @@
         "value": null
        },
        {
-        "color": "orange",
-        "value": 1000
+        "color": "yellow",
+        "value": 10000
        },
        {
         "color": "red",
-        "value": 10000
+        "value": 100000
        }
       ]
      },
-     "mappings": [],
-     "decimals": null
+     "mappings": []
     },
     "overrides": []
    },
@@ -300,25 +711,28 @@
     "reduceOptions": {
      "calcs": [
       "lastNotNull"
-     ]
+     ],
+     "fields": "",
+     "values": false
     },
     "colorMode": "background",
     "graphMode": "area",
-    "textMode": "auto"
+    "textMode": "value",
+    "justifyMode": "center"
    }
   },
   {
-   "id": 6,
+   "id": 13,
    "type": "stat",
-   "title": "Historial (proyector)",
-   "description": "El mercado NO depende de este componente.",
+   "title": "Historial (Postgres)",
+   "description": "Si el proyector hacia Postgres está sano.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
    "gridPos": {
-    "x": 20,
-    "y": 0,
+    "x": 16,
+    "y": 8,
     "w": 4,
     "h": 4
    },
@@ -330,12 +744,14 @@
       "type": "prometheus",
       "uid": "prometheus"
      },
-     "instant": false
+     "legendFormat": "",
+     "instant": false,
+     "range": true
     }
    ],
    "fieldConfig": {
     "defaults": {
-     "unit": "short",
+     "unit": "none",
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -363,8 +779,7 @@
         }
        }
       }
-     ],
-     "decimals": null
+     ]
     },
     "overrides": []
    },
@@ -372,498 +787,229 @@
     "reduceOptions": {
      "calcs": [
       "lastNotNull"
-     ]
+     ],
+     "fields": "",
+     "values": false
     },
     "colorMode": "background",
-    "graphMode": "area",
-    "textMode": "auto"
-   }
-  },
-  {
-   "id": 7,
-   "type": "timeseries",
-   "title": "Órdenes por segundo según resultado",
-   "description": "accepted = entró; insufficient_funds = sin saldo; duplicate = id repetido; overloaded = cola llena.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 0,
-    "y": 4,
-    "w": 12,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "sum by (result) (rate(orderbook_orders_total[1m]))",
-     "legendFormat": "{{result}}",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "ops",
-     "custom": {
-      "lineWidth": 2,
-      "fillOpacity": 40,
-      "showPoints": "never",
-      "stacking": {
-       "mode": "normal"
-      }
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
-    }
-   }
-  },
-  {
-   "id": 8,
-   "type": "timeseries",
-   "title": "Latencia de POST /orders",
-   "description": "",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 12,
-    "y": 4,
-    "w": 12,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "histogram_quantile(0.5, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[1m])))",
-     "legendFormat": "p50",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "B",
-     "expr": "histogram_quantile(0.95, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[1m])))",
-     "legendFormat": "p95",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "C",
-     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[1m])))",
-     "legendFormat": "p99",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "s",
-     "custom": {
-      "lineWidth": 2,
-      "fillOpacity": 15,
-      "showPoints": "never",
-      "stacking": {
-       "mode": "none"
-      }
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
-    }
-   }
-  },
-  {
-   "id": 9,
-   "type": "timeseries",
-   "title": "Cola del secuenciador (profundidad y rechazos)",
-   "description": "Comandos esperando en la cola (capacidad: 50.000). La cola absorbe ráfagas; sostenida cerca de la capacidad = el matching no da abasto. Con la cola llena se responde 503. «Descartadas por expiración»: comandos cuyo cliente ya se había rendido (timeout) y que NO se ejecutaron.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 0,
-    "y": 12,
-    "w": 12,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "orderbook_queue_depth",
-     "legendFormat": "en cola",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "C",
-     "expr": "rate(orderbook_queue_rejected_total[1m])",
-     "legendFormat": "rechazos/s (503)",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "C",
-     "expr": "rate(orderbook_queue_expired_total[1m])",
-     "legendFormat": "descartadas por expiración/s",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "short",
-     "custom": {
-      "lineWidth": 2,
-      "fillOpacity": 15,
-      "showPoints": "never",
-      "stacking": {
-       "mode": "none"
-      }
-     },
-     "min": 0
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
-    }
-   }
-  },
-  {
-   "id": 10,
-   "type": "timeseries",
-   "title": "Tiempo de espera en cola",
-   "description": "",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 12,
-    "y": 12,
-    "w": 12,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "histogram_quantile(0.5, sum by (le) (rate(orderbook_queue_wait_seconds_bucket[1m])))",
-     "legendFormat": "p50",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "B",
-     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_queue_wait_seconds_bucket[1m])))",
-     "legendFormat": "p99",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "s",
-     "custom": {
-      "lineWidth": 2,
-      "fillOpacity": 15,
-      "showPoints": "never",
-      "stacking": {
-       "mode": "none"
-      }
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
-    }
-   }
-  },
-  {
-   "id": 11,
-   "type": "timeseries",
-   "title": "Group commit: comandos por fsync",
-   "description": "Cuántas órdenes comparten un mismo fsync. Sube con la carga y con el costo del disco: es lo que permite escalar.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 0,
-    "y": 20,
-    "w": 12,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "rate(orderbook_commands_processed_total[1m]) / rate(orderbook_journal_syncs_total[1m])",
-     "legendFormat": "comandos por fsync (media)",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "B",
-     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_batch_size_bucket[1m])))",
-     "legendFormat": "tamaño de lote p99",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "short",
-     "custom": {
-      "lineWidth": 2,
-      "fillOpacity": 15,
-      "showPoints": "never",
-      "stacking": {
-       "mode": "none"
-      }
-     },
-     "min": 0
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
-    }
-   }
-  },
-  {
-   "id": 12,
-   "type": "timeseries",
-   "title": "Duración del fsync y del matching por lote",
-   "description": "Si fsync domina, el disco es el cuello de botella; el matching en memoria casi no pesa.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 12,
-    "y": 20,
-    "w": 12,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "histogram_quantile(0.5, sum by (le) (rate(orderbook_journal_fsync_seconds_bucket[1m])))",
-     "legendFormat": "fsync p50",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "B",
-     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_journal_fsync_seconds_bucket[1m])))",
-     "legendFormat": "fsync p99",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "C",
-     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_batch_exec_seconds_bucket[1m])))",
-     "legendFormat": "matching p99",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "s",
-     "custom": {
-      "lineWidth": 2,
-      "fillOpacity": 15,
-      "showPoints": "never",
-      "stacking": {
-       "mode": "none"
-      }
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
-    }
-   }
-  },
-  {
-   "id": 13,
-   "type": "timeseries",
-   "title": "Respuestas HTTP por código",
-   "description": "201 ok · 409 id repetido · 422 sin saldo · 503 backpressure · 5xx/504 errores reales.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 0,
-    "y": 28,
-    "w": 12,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "sum by (code) (rate(orderbook_http_requests_total[1m]))",
-     "legendFormat": "{{code}}",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "ops",
-     "custom": {
-      "lineWidth": 2,
-      "fillOpacity": 40,
-      "showPoints": "never",
-      "stacking": {
-       "mode": "normal"
-      }
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
-    }
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
    }
   },
   {
    "id": 14,
-   "type": "timeseries",
-   "title": "Volumen negociado",
-   "description": "Valor en R$/s (eje izquierdo) y unidades de Vibranium/s (eje derecho).",
+   "type": "stat",
+   "title": "Disco libre",
+   "description": "Espacio libre donde vive el journal. Con el disco lleno el servicio se detiene a propósito (fail-stop). Rojo < 2 GiB.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
    "gridPos": {
-    "x": 12,
-    "y": 28,
+    "x": 20,
+    "y": 8,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_journal_disk_free_bytes",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 2147483648
+       },
+       {
+        "color": "green",
+        "value": 5368709120
+       }
+      ]
+     },
+     "mappings": [],
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "background",
+    "graphMode": "area",
+    "textMode": "value",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 15,
+   "type": "row",
+   "title": "2 · Tráfico de órdenes",
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 12,
+    "w": 24,
+    "h": 1
+   },
+   "description": "Qué entra, qué se acepta, qué se rechaza y cuánto se negocia."
+  },
+  {
+   "id": 16,
+   "type": "timeseries",
+   "title": "Órdenes por segundo según resultado",
+   "description": "Cada línea es un destino posible de la orden: accepted (aceptada), duplicate (id repetido, 409), insufficient_funds (sin saldo, 422), invalid (datos inválidos, 400), timeout (504), overloaded (503).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 13,
     "w": 12,
     "h": 8
    },
    "targets": [
     {
      "refId": "A",
-     "expr": "rate(orderbook_traded_units_total[1m])",
-     "legendFormat": "unidades de Vibranium/s",
+     "expr": "sum by (result) (rate(orderbook_orders_total[$rate]))",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "B",
-     "expr": "rate(orderbook_traded_value_cents_total[1m]) / 100",
-     "legendFormat": "valor en R$/s",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
+     },
+     "legendFormat": "{{result}}",
+     "instant": false,
+     "range": true
     }
    ],
    "fieldConfig": {
     "defaults": {
-     "unit": "short",
+     "unit": "reqps",
      "custom": {
       "lineWidth": 2,
-      "fillOpacity": 15,
+      "fillOpacity": 35,
       "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
       "stacking": {
-       "mode": "none"
-      }
+       "mode": "normal",
+       "group": "A"
+      },
+      "axisSoftMin": 0
      }
     },
     "overrides": [
      {
       "matcher": {
        "id": "byName",
-       "options": "unidades de Vibranium/s"
+       "options": "accepted"
       },
       "properties": [
        {
-        "id": "custom.axisPlacement",
-        "value": "right"
-       },
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "green"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "duplicate"
+      },
+      "properties": [
        {
-        "id": "unit",
-        "value": "short"
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "yellow"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "insufficient_funds"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "blue"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "invalid"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "orange"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "timeout"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "red"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "overloaded"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "dark-red"
+        }
        }
       ]
      }
@@ -871,166 +1017,163 @@
    },
    "options": {
     "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
     },
     "tooltip": {
-     "mode": "multi"
-    }
-   }
-  },
-  {
-   "id": 15,
-   "type": "timeseries",
-   "title": "Journal (fuente de verdad)",
-   "description": "",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 0,
-    "y": 36,
-    "w": 12,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "rate(orderbook_journal_last_seq[1m])",
-     "legendFormat": "registros/s",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "B",
-     "expr": "orderbook_journal_bytes / 1024 / 1024",
-     "legendFormat": "tamaño (MiB)",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "short",
-     "custom": {
-      "lineWidth": 2,
-      "fillOpacity": 15,
-      "showPoints": "never",
-      "stacking": {
-       "mode": "none"
-      }
-     }
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
-    }
-   }
-  },
-  {
-   "id": 16,
-   "type": "timeseries",
-   "title": "Proyector a Postgres",
-   "description": "Con Postgres caído el lag crece y se recupera solo al volver; el matching no se detiene.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
-   "gridPos": {
-    "x": 12,
-    "y": 36,
-    "w": 12,
-    "h": 8
-   },
-   "targets": [
-    {
-     "refId": "A",
-     "expr": "orderbook_projector_lag",
-     "legendFormat": "lag (registros)",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "B",
-     "expr": "rate(orderbook_projector_failures_total[1m])",
-     "legendFormat": "errores/s",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    }
-   ],
-   "fieldConfig": {
-    "defaults": {
-     "unit": "short",
-     "custom": {
-      "lineWidth": 2,
-      "fillOpacity": 15,
-      "showPoints": "never",
-      "stacking": {
-       "mode": "none"
-      }
-     },
-     "min": 0
-    },
-    "overrides": []
-   },
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
+     "mode": "multi",
+     "sort": "desc"
     }
    }
   },
   {
    "id": 17,
    "type": "timeseries",
-   "title": "Runtime de Go",
-   "description": "",
+   "title": "Órdenes aceptadas: compra vs venta",
+   "description": "Equilibrio entre compras (BUY) y ventas (SELL) aceptadas.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 13,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (side) (rate(orderbook_orders_total{result=\"accepted\"}[$rate]))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "{{side}}",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 35,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "normal",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "BUY"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "green"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "SELL"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "red"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 18,
+   "type": "timeseries",
+   "title": "Trades y volumen negociado",
+   "description": "Ejecuciones por segundo, unidades de Vibranium negociadas por segundo y su valor en reales por segundo.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
    "gridPos": {
     "x": 0,
-    "y": 68,
-    "w": 24,
-    "h": 6
+    "y": 21,
+    "w": 12,
+    "h": 8
    },
    "targets": [
     {
      "refId": "A",
-     "expr": "go_goroutines",
-     "legendFormat": "goroutines",
+     "expr": "rate(orderbook_trades_total[$rate])",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
-     }
+     },
+     "legendFormat": "trades / s",
+     "instant": false,
+     "range": true
     },
     {
      "refId": "B",
-     "expr": "go_memstats_alloc_bytes / 1024 / 1024",
-     "legendFormat": "heap (MiB)",
+     "expr": "rate(orderbook_traded_units_total[$rate])",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
-     }
+     },
+     "legendFormat": "unidades de VIB / s",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "C",
+     "expr": "rate(orderbook_traded_value_cents_total[$rate]) / 100",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "valor negociado (R$ / s)",
+     "instant": false,
+     "range": true
     }
    ],
    "fieldConfig": {
@@ -1040,8 +1183,668 @@
       "lineWidth": 2,
       "fillOpacity": 15,
       "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
       "stacking": {
-       "mode": "none"
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 19,
+   "type": "timeseries",
+   "title": "Respuestas HTTP por código",
+   "description": "Códigos de respuesta de la API pública: 201 orden creada, 200 consulta, 204 depósito, 4xx error del cliente, 503 sobrecarga, 504 timeout.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 21,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (code) (rate(orderbook_http_requests_total[$rate]))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "{{code}}",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 35,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "normal",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "201"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "green"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "200"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "light-green"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "204"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "super-light-green"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "400"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "orange"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "409"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "yellow"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "422"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "blue"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "503"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "dark-red"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "504"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "red"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 20,
+   "type": "bargauge",
+   "title": "Peticiones por segundo, por ruta",
+   "description": "Qué endpoints se están usando y cuánto.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 29,
+    "w": 12,
+    "h": 7
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (route) (rate(orderbook_http_requests_total[$rate]))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "{{route}}",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "blue",
+        "value": null
+       }
+      ]
+     },
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "orientation": "horizontal",
+    "displayMode": "gradient",
+    "showUnfilled": true,
+    "valueMode": "color"
+   }
+  },
+  {
+   "id": 21,
+   "type": "timeseries",
+   "title": "Cancelaciones por resultado",
+   "description": "ok = cancelada; not_found = ya estaba ejecutada o no existía (404).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 29,
+    "w": 12,
+    "h": 7
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (result) (rate(orderbook_cancels_total[$rate]))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "{{result}}",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 35,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "normal",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 22,
+   "type": "row",
+   "title": "3 · Latencia (medida por el servidor)",
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 36,
+    "w": 24,
+    "h": 1
+   },
+   "description": "Cuánto tarda en responder la API. No incluye el tiempo previo a que el servidor reciba la petición."
+  },
+  {
+   "id": 23,
+   "type": "timeseries",
+   "title": "Latencia de POST /orders por percentil",
+   "description": "p99 = el 99 % de las órdenes tarda menos que esto. La leyenda muestra el último valor, el promedio y el máximo del periodo.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 37,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "p50 (mediana)",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "B",
+     "expr": "histogram_quantile(0.9, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "p90",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "C",
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "p95",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "D",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "p99",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "E",
+     "expr": "histogram_quantile(0.999, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "p99.9",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 24,
+   "type": "heatmap",
+   "title": "Distribución de los tiempos de respuesta de POST /orders",
+   "description": "Cada columna es un instante y cada fila un rango de tiempo; el color es cuántas órdenes cayeron ahí. Una franja horizontal estrecha = latencia estable; manchas arriba = picos (GC, snapshot).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 37,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (le) (increase(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[$rate]))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "{{le}}",
+     "instant": false,
+     "range": true,
+     "format": "heatmap"
+    }
+   ],
+   "options": {
+    "calculate": false,
+    "yAxis": {
+     "axisPlacement": "left",
+     "unit": "s"
+    },
+    "color": {
+     "mode": "scheme",
+     "scheme": "Turbo",
+     "fill": "dark-orange",
+     "scale": "exponential",
+     "exponent": 0.5,
+     "steps": 64,
+     "reverse": false
+    },
+    "cellGap": 1,
+    "tooltip": {
+     "show": true,
+     "yHistogram": true
+    },
+    "legend": {
+     "show": true
+    },
+    "rowsFrame": {
+     "layout": "auto"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "scaleDistribution": {
+       "type": "linear"
+      }
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 25,
+   "type": "timeseries",
+   "title": "Latencia p95 por ruta",
+   "description": "Qué endpoint es el más lento.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 45,
+    "w": 12,
+    "h": 9
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.95, sum by (le, route) (rate(orderbook_http_request_duration_seconds_bucket[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "{{route}}",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 0,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 26,
+   "type": "timeseries",
+   "title": "Desglose de la latencia (p99): cola · matching · fsync · HTTP",
+   "description": "Dónde se va el tiempo. Si domina la espera en cola, el secuenciador está ocupado (snapshots, lecturas pesadas); si domina el fsync, el disco es lento.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 45,
+    "w": 12,
+    "h": 9
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_queue_wait_seconds_bucket[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "espera en cola",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "B",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_batch_exec_seconds_bucket[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "matching + liquidación (por lote)",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "C",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_journal_fsync_seconds_bucket[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "fsync del journal (por lote)",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "D",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_http_request_duration_seconds_bucket{route=\"POST /orders\"}[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "HTTP completo POST /orders",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0,
+      "scaleDistribution": {
+       "type": "log",
+       "log": 10
       }
      }
     },
@@ -1049,56 +1852,61 @@
    },
    "options": {
     "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
     },
     "tooltip": {
-     "mode": "multi"
+     "mode": "multi",
+     "sort": "desc"
     }
    }
   },
   {
-   "id": 18,
+   "id": 27,
+   "type": "row",
+   "title": "4 · Secuenciador y cola (camino caliente)",
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 54,
+    "w": 24,
+    "h": 1
+   },
+   "description": "Un solo hilo ejecuta las órdenes en orden; esta sección muestra qué tan cargado está."
+  },
+  {
+   "id": 28,
    "type": "timeseries",
-   "title": "Snapshots y tiempo de reinicio",
+   "title": "Cola del secuenciador: profundidad",
+   "description": "Comandos esperando al secuenciador. La capacidad es de 10.000 (QUEUE_SIZE): si se acerca, la API empieza a responder 503. Ver también «Ocupación de cola» arriba.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "description": "Registros posteriores al último snapshot = lo que habría que reproducir al arrancar (≈ 8 s por millón). La pausa es lo que se detiene el secuenciador al copiar el estado; la escritura a disco ocurre en segundo plano.",
    "gridPos": {
     "x": 0,
-    "y": 44,
-    "w": 24,
+    "y": 55,
+    "w": 8,
     "h": 8
    },
    "targets": [
     {
      "refId": "A",
-     "expr": "orderbook_snapshot_age_records",
-     "legendFormat": "registros por reproducir en un reinicio",
+     "expr": "orderbook_queue_depth",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "B",
-     "expr": "orderbook_snapshot_pause_seconds",
-     "legendFormat": "pausa del secuenciador (s)",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
-    },
-    {
-     "refId": "C",
-     "expr": "orderbook_snapshot_write_seconds",
-     "legendFormat": "escritura en segundo plano (s)",
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     }
+     },
+     "legendFormat": "comandos en cola",
+     "instant": false,
+     "range": true
     }
    ],
    "fieldConfig": {
@@ -1108,26 +1916,117 @@
       "lineWidth": 2,
       "fillOpacity": 15,
       "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
       "stacking": {
-       "mode": "none"
-      }
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 29,
+   "type": "timeseries",
+   "title": "Rechazos y descartes por segundo",
+   "description": "Debe estar en 0 en operación normal.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 55,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "rate(orderbook_queue_rejected_total[$rate])",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
      },
-     "min": 0
+     "legendFormat": "rechazadas por cola llena (503)",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "B",
+     "expr": "rate(orderbook_queue_expired_total[$rate])",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "descartadas: el cliente ya no esperaba",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
     },
     "overrides": [
      {
       "matcher": {
-       "id": "byRegexp",
-       "options": ".*\\(s\\)|escritura.*"
+       "id": "byName",
+       "options": "rechazadas por cola llena (503)"
       },
       "properties": [
        {
-        "id": "custom.axisPlacement",
-        "value": "right"
-       },
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "red"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "descartadas: el cliente ya no esperaba"
+      },
+      "properties": [
        {
-        "id": "unit",
-        "value": "s"
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "orange"
+        }
        }
       ]
      }
@@ -1135,56 +2034,142 @@
    },
    "options": {
     "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "max"
+     ]
     },
     "tooltip": {
-     "mode": "multi"
+     "mode": "multi",
+     "sort": "desc"
     }
    }
   },
   {
-   "id": 19,
+   "id": 30,
    "type": "timeseries",
-   "title": "Ventana de idempotencia",
+   "title": "Tiempo de espera en cola",
+   "description": "Cuánto espera un comando antes de ejecutarse. Los picos suelen coincidir con la pausa de un snapshot.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "description": "Ids recordados para rechazar reintentos (acotado al límite) y ids olvidados por segundo. Con el límite alcanzado la memoria deja de crecer.",
    "gridPos": {
-    "x": 0,
-    "y": 52,
-    "w": 24,
-    "h": 6
+    "x": 16,
+    "y": 55,
+    "w": 8,
+    "h": 8
    },
    "targets": [
     {
      "refId": "A",
-     "expr": "orderbook_idempotency_window_size",
-     "legendFormat": "ids recordados",
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(orderbook_queue_wait_seconds_bucket[$rate])))",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
-     }
+     },
+     "legendFormat": "p50",
+     "instant": false,
+     "range": true
     },
     {
      "refId": "B",
-     "expr": "orderbook_idempotency_window_limit",
-     "legendFormat": "límite",
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(orderbook_queue_wait_seconds_bucket[$rate])))",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
-     }
+     },
+     "legendFormat": "p95",
+     "instant": false,
+     "range": true
     },
     {
      "refId": "C",
-     "expr": "rate(orderbook_idempotency_evicted_total[1m])",
-     "legendFormat": "ids olvidados/s",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_queue_wait_seconds_bucket[$rate])))",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
+     },
+     "legendFormat": "p99",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
      }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 31,
+   "type": "timeseries",
+   "title": "Group commit: comandos agrupados por cada fsync",
+   "description": "Cuántas órdenes comparten un mismo fsync. Con un disco real, más carga = lotes más grandes y menos fsync por orden.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 63,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "rate(orderbook_commands_processed_total[$rate]) / rate(orderbook_journal_syncs_total[$rate])",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "promedio",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "B",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_batch_size_bucket[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "p99 del tamaño de lote",
+     "instant": false,
+     "range": true
     }
    ],
    "fieldConfig": {
@@ -1192,72 +2177,320 @@
      "unit": "short",
      "custom": {
       "lineWidth": 2,
-      "fillOpacity": 10,
+      "fillOpacity": 15,
       "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
       "stacking": {
-       "mode": "none"
-      }
-     },
-     "min": 0
-    },
-    "overrides": [
-     {
-      "matcher": {
-       "id": "byName",
-       "options": "ids olvidados/s"
+       "mode": "none",
+       "group": "A"
       },
-      "properties": [
-       {
-        "id": "custom.axisPlacement",
-        "value": "right"
-       }
-      ]
+      "axisSoftMin": 0
      }
-    ]
+    },
+    "overrides": []
    },
    "options": {
     "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
     },
     "tooltip": {
-     "mode": "multi"
+     "mode": "multi",
+     "sort": "desc"
     }
    }
   },
   {
-   "id": 20,
+   "id": 32,
    "type": "timeseries",
-   "title": "Disco del journal",
+   "title": "Duración del matching y del fsync por lote",
+   "description": "El matching cuesta microsegundos; el fsync depende del disco.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "description": "Espacio libre donde vive el journal y su tamaño. Con el disco lleno el servicio hace fail-stop. Alertas: JournalDiskLow (< 2 GiB) y JournalDiskFillingUp (se llena en < 6 h).",
    "gridPos": {
-    "x": 0,
-    "y": 60,
-    "w": 24,
-    "h": 6
+    "x": 8,
+    "y": 63,
+    "w": 8,
+    "h": 8
    },
    "targets": [
     {
      "refId": "A",
-     "expr": "orderbook_journal_disk_free_bytes",
-     "legendFormat": "libre en disco",
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(orderbook_batch_exec_seconds_bucket[$rate])))",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
-     }
+     },
+     "legendFormat": "matching p50",
+     "instant": false,
+     "range": true
     },
     {
      "refId": "B",
-     "expr": "orderbook_journal_bytes",
-     "legendFormat": "tamaño del journal",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_batch_exec_seconds_bucket[$rate])))",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
+     },
+     "legendFormat": "matching p99",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "C",
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(orderbook_journal_fsync_seconds_bucket[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "fsync p50",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "D",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(orderbook_journal_fsync_seconds_bucket[$rate])))",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "fsync p99",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
      }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 33,
+   "type": "timeseries",
+   "title": "Peticiones HTTP en curso",
+   "description": "Conexiones siendo atendidas ahora mismo.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 63,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_http_in_flight_requests",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "en curso",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 34,
+   "type": "row",
+   "title": "5 · Persistencia: journal y snapshots",
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 71,
+    "w": 24,
+    "h": 1
+   },
+   "description": "El journal es la fuente de verdad; los snapshots aceleran el arranque."
+  },
+  {
+   "id": 35,
+   "type": "timeseries",
+   "title": "Crecimiento del journal",
+   "description": "Ritmo al que se escribe el journal.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 72,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "rate(orderbook_journal_last_seq[$rate])",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "registros por segundo",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "B",
+     "expr": "rate(orderbook_journal_bytes[$rate]) / 1024 / 1024",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "MiB por segundo",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 36,
+   "type": "timeseries",
+   "title": "Tamaño del journal y espacio libre",
+   "description": "Si el espacio libre llega a 0, el servidor se detiene a propósito (fail-stop). Alertas: < 2 GiB o se llena en menos de 6 h.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 72,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_journal_bytes",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "tamaño del journal",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "B",
+     "expr": "orderbook_journal_disk_free_bytes",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "espacio libre en disco",
+     "instant": false,
+     "range": true
     }
    ],
    "fieldConfig": {
@@ -1265,32 +2498,1031 @@
      "unit": "bytes",
      "custom": {
       "lineWidth": 2,
-      "fillOpacity": 10,
+      "fillOpacity": 15,
       "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
       "stacking": {
-       "mode": "none"
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0,
+      "thresholdsStyle": {
+       "mode": "line"
       }
      },
-     "min": 0
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "transparent",
+        "value": 2147483648
+       }
+      ]
+     }
     },
     "overrides": []
    },
    "options": {
     "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "min"
+     ]
     },
     "tooltip": {
-     "mode": "multi"
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 37,
+   "type": "timeseries",
+   "title": "fsync por segundo",
+   "description": "Cuántas veces por segundo se sincroniza el journal a disco.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 72,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "rate(orderbook_journal_syncs_total[$rate])",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "fsync / s",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 38,
+   "type": "timeseries",
+   "title": "Snapshots: antigüedad (registros por reproducir tras un crash)",
+   "description": "Cuánto habría que reproducir si el proceso muriera ahora (≈ 9 s por millón). Se reinicia a 0 con cada snapshot (cada 1.000.000 de registros).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 80,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_snapshot_age_records",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "registros desde el último snapshot",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0,
+      "thresholdsStyle": {
+       "mode": "line"
+      }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "transparent",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 1000000
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 39,
+   "type": "timeseries",
+   "title": "Snapshots: pausa del secuenciador y tiempo de escritura",
+   "description": "La pausa detiene el matching mientras se copia el estado: es la principal causa de picos de latencia con estado grande.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 80,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_snapshot_pause_seconds",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "pausa del secuenciador (copia del estado)",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "B",
+     "expr": "orderbook_snapshot_write_seconds",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "escritura a disco (en segundo plano)",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "pausa del secuenciador (copia del estado)"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "red"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 40,
+   "type": "stat",
+   "title": "Último reinicio: tiempo de recuperación",
+   "description": "Cuánto tardó en recuperarse el estado al arrancar (snapshot + cola del journal).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 80,
+    "w": 4,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_recovery_seconds",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 5
+       },
+       {
+        "color": "red",
+        "value": 30
+       }
+      ]
+     },
+     "mappings": [],
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "background",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 41,
+   "type": "stat",
+   "title": "Último reinicio: registros reproducidos",
+   "description": "Registros del journal reproducidos al arrancar (0 si el snapshot estaba al día).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 20,
+    "y": 80,
+    "w": 4,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_recovery_replayed_records",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "blue",
+        "value": null
+       }
+      ]
+     },
+     "mappings": []
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "background",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   }
+  },
+  {
+   "id": 42,
+   "type": "row",
+   "title": "6 · Memoria y recolector de basura (Go)",
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 88,
+    "w": 24,
+    "h": 1
+   },
+   "description": "Qué tan sano está el proceso por dentro."
+  },
+  {
+   "id": 43,
+   "type": "timeseries",
+   "title": "Memoria: heap en uso y RSS",
+   "description": "RSS ≈ heap reservado − lo devuelto al SO. Crece con el libro de órdenes y la ventana de idempotencia; el contenedor tiene un tope (mem_limit).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 89,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "go_memstats_heap_inuse_bytes",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "heap en uso (lo que usa el programa)",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "B",
+     "expr": "process_resident_memory_bytes",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "RSS (lo que el SO le asigna)",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "C",
+     "expr": "go_memstats_heap_idle_bytes - go_memstats_heap_released_bytes",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "heap libre aún no devuelto al SO",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 44,
+   "type": "timeseries",
+   "title": "Pausa del recolector de basura (GC)",
+   "description": "Cuánto detuvo el GC al programa en su peor ciclo reciente. Debe ser de milisegundos.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 89,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "go_gc_duration_seconds{quantile=\"1\"}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "pausa máxima reciente (stop-the-world)",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 45,
+   "type": "timeseries",
+   "title": "Ciclos de GC y goroutines",
+   "description": "Frecuencia del recolector (más basura = más ciclos) y cantidad de goroutines.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 89,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "rate(go_gc_duration_seconds_count[$rate])",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "ciclos de GC por segundo",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "B",
+     "expr": "go_goroutines",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "goroutines",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 46,
+   "type": "row",
+   "title": "7 · Historial en PostgreSQL (proyector)",
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 97,
+    "w": 24,
+    "h": 1
+   },
+   "description": "Copia consultable del journal. Si Postgres cae, el matching sigue funcionando."
+  },
+  {
+   "id": 47,
+   "type": "timeseries",
+   "title": "Lag del historial",
+   "description": "Debe tender a 0 cuando baja la carga. Si sube sin parar, Postgres no da abasto o está caído.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 98,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_projector_lag",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "registros pendientes de reflejar en Postgres",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0,
+      "thresholdsStyle": {
+       "mode": "line"
+      }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "transparent",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 100000
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 48,
+   "type": "timeseries",
+   "title": "Journal vs historial",
+   "description": "La distancia entre ambas líneas es el lag.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 98,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_journal_last_seq",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "último registro del journal",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "B",
+     "expr": "orderbook_projector_seq",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "último registro reflejado en Postgres",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 49,
+   "type": "timeseries",
+   "title": "Errores del proyector y relecturas",
+   "description": "Errores = Postgres caído o lento. Relecturas: 1 si reanudó por offset; ≈ todo el journal si tuvo que leerlo completo.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 98,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "rate(orderbook_projector_failures_total[$rate])",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "errores por segundo",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "B",
+     "expr": "orderbook_projector_rescanned_records_total",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "registros releídos al arrancar (acumulado)",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 50,
+   "type": "row",
+   "title": "8 · Idempotencia (ventana de ids recordados)",
+   "collapsed": false,
+   "panels": [],
+   "gridPos": {
+    "x": 0,
+    "y": 106,
+    "w": 24,
+    "h": 1
+   },
+   "description": "Evita duplicar una orden si el cliente reintenta con el mismo id."
+  },
+  {
+   "id": 51,
+   "type": "timeseries",
+   "title": "Ventana de idempotencia",
+   "description": "Cuántos ids de órdenes recientes se recuerdan. Al llegar al límite, los más antiguos se olvidan.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 107,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_idempotency_window_size",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "ids recordados",
+     "instant": false,
+     "range": true
+    },
+    {
+     "refId": "B",
+     "expr": "orderbook_idempotency_window_limit",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "límite configurado",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 52,
+   "type": "timeseries",
+   "title": "Ids olvidados por segundo",
+   "description": "0 mientras la ventana no está llena; luego igual al ritmo de órdenes.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 107,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "rate(orderbook_idempotency_evicted_total[$rate])",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "legendFormat": "ids expulsados / s",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never",
+      "spanNulls": true,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true,
+     "calcs": [
+      "lastNotNull",
+      "mean",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
     }
    }
   }
- ],
- "editable": false,
- "annotations": {
-  "list": []
- },
- "templating": {
-  "list": []
- }
+ ]
 }

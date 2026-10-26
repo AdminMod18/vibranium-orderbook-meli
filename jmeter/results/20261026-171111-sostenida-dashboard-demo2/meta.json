@@ -1,0 +1,10 @@
+{
+  "escenario": "sostenida", "label": "dashboard-demo2", "run_id": "202610261711113d2f",
+  "inicio_epoch": 1793034671, "fin_epoch": 1793034776, "jmeter_rc": 0,
+  "commit": "eb29faa", "rama": "claude/focused-babbage-2ppmql",
+  "jmeter": "5.6.3",
+  "java": "openjdk version 21.0.12.1 2026-08-18",
+  "cpu_nucleos": 4, "memoria_mb": 16091,
+  "disco_libre_gb_al_terminar": "3",
+  "fecha_utc": "2026-10-26T17:12:57Z"
+}
