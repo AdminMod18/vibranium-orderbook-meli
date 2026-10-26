@@ -27,13 +27,13 @@ type Report struct {
 }
 
 // Recover devuelve el exchange reconstruido y el journal listo para escribir.
-// snapPath vacío desactiva los snapshots.
-func Recover(journalPath, snapPath string, opts journal.Options, log *slog.Logger) (*exchange.Exchange, *journal.Journal, Report, error) {
+// snapPath vacío desactiva los snapshots. window es el tamaño de la ventana de idempotencia (0 = sin límite).
+func Recover(journalPath, snapPath string, opts journal.Options, window int, log *slog.Logger) (*exchange.Exchange, *journal.Journal, Report, error) {
 	t0 := time.Now()
 	var rep Report
 
 	if snapPath != "" {
-		ex, jr, r, reason := tryWithSnapshot(journalPath, snapPath, opts)
+		ex, jr, r, reason := tryWithSnapshot(journalPath, snapPath, opts, window)
 		if reason == "" {
 			r.Took = time.Since(t0)
 			return ex, jr, r, nil
@@ -44,7 +44,7 @@ func Recover(journalPath, snapPath string, opts journal.Options, log *slog.Logge
 		}
 	}
 
-	ex := exchange.New()
+	ex := exchange.NewWithWindow(window)
 	jr, stats, err := journal.Recover(journalPath, opts, func(r journal.Record) error { return journal.Apply(ex, r) })
 	if err != nil {
 		return nil, nil, rep, err
@@ -59,7 +59,7 @@ func Recover(journalPath, snapPath string, opts journal.Options, log *slog.Logge
 
 // tryWithSnapshot intenta la ruta rápida. Si devuelve reason != "", la ruta rápida NO se usó
 // (y no deja nada abierto ni modificado).
-func tryWithSnapshot(journalPath, snapPath string, opts journal.Options) (*exchange.Exchange, *journal.Journal, Report, string) {
+func tryWithSnapshot(journalPath, snapPath string, opts journal.Options, window int) (*exchange.Exchange, *journal.Journal, Report, string) {
 	snap, err := snapshot.Read(snapPath)
 	if err != nil {
 		return nil, nil, Report{}, err.Error()
@@ -71,7 +71,7 @@ func tryWithSnapshot(journalPath, snapPath string, opts journal.Options) (*excha
 	if id == "" || id != snap.JournalID {
 		return nil, nil, Report{}, "el snapshot pertenece a otro journal"
 	}
-	ex, err := exchange.Restore(snap.State)
+	ex, err := exchange.Restore(snap.State, window)
 	if err != nil {
 		return nil, nil, Report{}, "estado del snapshot inválido: " + err.Error()
 	}

@@ -57,7 +57,8 @@ Consejo: durante el paso de carga, **mira el dashboard** y cuenta qué se ve (ó
 | ¿Y dos instancias a la vez? | Corromperían el journal: no hay candado (L7). Falta *leader election*/lock | `DECISIONES.md` L7 |
 | ¿Cómo evitas el doble gasto? | Reserva de fondos al ingresar + secuenciador único | `smoke.sh` paso 3 |
 | ¿Y reintentos de bots? | `id` de orden = clave de idempotencia (409 si se repite) | `DECISIONES.md` D18 |
-| ¿Qué pasa con días de operación? | **Honesto:** los ids vistos y el journal crecen sin límite (L12/L13). Plan: TTL de idempotencia + rotación de segmentos | `DECISIONES.md` |
+| ¿Qué pasa con días de operación? | La idempotencia está **acotada por una ventana** (5 M ids ≈ 409 MiB); el journal sí crece (≈150 GB/día a 5.000/s): hay que rotarlo (L13). Los snapshots ya lo permiten | `DECISIONES.md` D57, L13 |
+| ¿Y si un bot reintenta mucho después? | Pasada la ventana (≈17 min a 5.000/s) se acepta como nueva; si la orden sigue en el libro, se rechaza igual. Contrapartida estándar de toda API con claves de idempotencia | `drill-idempotency.sh` |
 | ¿Cómo sabes que funciona? | Tests con `-race`, smoke, drills, auditoría en vivo y `verify-all.sh` | `INFORME_PRUEBAS.md` |
 | ¿Por qué Prometheus y Grafana? | Prometheus recoge/guarda/alerta; Grafana dibuja; formato abierto | `OBSERVABILIDAD.md` |
 | ¿Cómo escalarías más? | Particionar por instrumento (1 secuenciador+journal por mercado) y separar API/secuenciador | `MEJORAS.md` |

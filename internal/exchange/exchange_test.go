@@ -181,7 +181,7 @@ func TestCaptureRestoreBehavesIdentically(t *testing.T) {
 		step(a, i, rng)
 	}
 
-	b, err := Restore(a.Capture())
+	b, err := Restore(a.Capture(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,13 +209,13 @@ func TestRestoreRejectsInconsistentState(t *testing.T) {
 
 	s := x.Capture()
 	s.Accounts["alice"] = wallet.Account{BRLFree: 1000} // reserva borrada: ya no cuadra con la orden abierta
-	if _, err := Restore(s); err == nil {
+	if _, err := Restore(s, 0); err == nil {
 		t.Fatal("un snapshot con reservas inconsistentes debe rechazarse")
 	}
 	s = x.Capture()
-	s.Seen = nil // orden en el libro que no figura como vista
-	if _, err := Restore(s); err == nil {
-		t.Fatal("debe rechazarse una orden abierta que no figura en los ids vistos")
+	s.DepositedBRL += 5 // el total depositado no coincide con los saldos
+	if _, err := Restore(s, 0); err == nil {
+		t.Fatal("un snapshot que viola la conservación del valor debe rechazarse")
 	}
 }
 
@@ -231,5 +231,128 @@ func TestInvariantDetectsValueCreatedOrDestroyed(t *testing.T) {
 	}
 	if err := x.CheckInvariants(); err == nil {
 		t.Fatal("debe detectarse valor creado fuera de un depósito registrado")
+	}
+}
+
+// --- Ventana de idempotencia ---
+
+func buyAndCancel(t *testing.T, x *Exchange, id string) error {
+	t.Helper()
+	if _, err := x.PlaceOrder(ord(id, "alice", domain.Buy, 10, 1)); err != nil {
+		return err
+	}
+	if _, err := x.Cancel(id); err != nil {
+		t.Fatal(err)
+	}
+	return nil
+}
+
+func TestIdempotencyWindowRejectsRecentAndForgetsOld(t *testing.T) {
+	x := NewWithWindow(3)
+	_ = x.Deposit("alice", 1_000_000, 0)
+	for _, id := range []string{"a1", "a2", "a3", "a4", "a5"} {
+		if err := buyAndCancel(t, x, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// ventana = {a3, a4, a5}
+	if x.SeenCount() != 3 || x.SeenEvicted() != 2 {
+		t.Fatalf("esperaba 3 ids y 2 expulsados, got %d y %d", x.SeenCount(), x.SeenEvicted())
+	}
+	if _, err := x.PlaceOrder(ord("a5", "alice", domain.Buy, 10, 1)); !errors.Is(err, ErrDuplicateOrder) {
+		t.Fatalf("un reintento reciente debe rechazarse: %v", err)
+	}
+	if _, err := x.PlaceOrder(ord("a3", "alice", domain.Buy, 10, 1)); !errors.Is(err, ErrDuplicateOrder) {
+		t.Fatalf("a3 sigue dentro de la ventana: %v", err)
+	}
+	// a2 salió de la ventana y su orden ya no está en el libro: se trata como una orden NUEVA
+	if err := buyAndCancel(t, x, "a2"); err != nil {
+		t.Fatalf("un id fuera de la ventana debe aceptarse como nuevo: %v", err)
+	}
+	if err := x.CheckInvariants(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Si el id salió de la ventana pero su orden SIGUE en el libro, el libro la protege: mismo error,
+// y no se queda ninguna reserva colgada.
+func TestForgottenIDWithRestingOrderIsStillRejected(t *testing.T) {
+	x := NewWithWindow(2)
+	_ = x.Deposit("bob", 0, 100)
+	_ = x.Deposit("alice", 1_000_000, 0)
+	place(t, x, ord("s1", "bob", domain.Sell, 1000, 5)) // queda en el libro
+	for _, id := range []string{"o2", "o3"} {           // empujan a s1 fuera de la ventana
+		if err := buyAndCancel(t, x, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if x.seen.has("s1") {
+		t.Fatal("s1 debía haber salido de la ventana")
+	}
+	before := x.Balance("bob")
+	if _, err := x.PlaceOrder(ord("s1", "bob", domain.Sell, 1000, 5)); !errors.Is(err, ErrDuplicateOrder) {
+		t.Fatalf("debe rechazarse con el MISMO error (409), got %v", err)
+	}
+	if x.Balance("bob") != before {
+		t.Fatalf("no debe quedar reserva colgada: %+v -> %+v", before, x.Balance("bob"))
+	}
+	if err := x.CheckInvariants(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWindowStaysBoundedUnderLongRun(t *testing.T) {
+	const limit = 1000
+	x := NewWithWindow(limit)
+	_ = x.Deposit("alice", 1<<40, 0)
+	for i := 0; i < 60_000; i++ {
+		if err := buyAndCancel(t, x, fmt.Sprintf("o%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if x.SeenCount() != limit || len(x.Capture().Seen) != limit {
+		t.Fatalf("la ventana debe quedar en %d ids: contador=%d snapshot=%d", limit, x.SeenCount(), len(x.Capture().Seen))
+	}
+	if len(x.seen.set) != limit || len(x.seen.queue) > 40_000 {
+		t.Fatalf("estructuras sin acotar: set=%d cola=%d (se compacta)", len(x.seen.set), len(x.seen.queue))
+	}
+	if x.SeenEvicted() != 60_000-limit {
+		t.Fatalf("expulsados: %d", x.SeenEvicted())
+	}
+}
+
+func TestWindowIsDeterministic(t *testing.T) {
+	run := func() []string {
+		x := NewWithWindow(50)
+		_ = x.Deposit("alice", 1<<40, 0)
+		rng := rand.New(rand.NewSource(5))
+		for i := 0; i < 2000; i++ {
+			_ = buyAndCancel(t, x, fmt.Sprintf("o%d", rng.Intn(300))) // ids que se repiten
+		}
+		return x.Capture().Seen
+	}
+	a, b := run(), run()
+	if len(a) != 50 || fmt.Sprint(a) != fmt.Sprint(b) {
+		t.Fatalf("la ventana debe ser idéntica entre ejecuciones (len=%d)", len(a))
+	}
+}
+
+func TestRestoreAppliesTheCurrentWindow(t *testing.T) {
+	x := NewWithWindow(0)
+	_ = x.Deposit("alice", 1<<40, 0)
+	for i := 0; i < 10; i++ {
+		_ = buyAndCancel(t, x, fmt.Sprintf("o%d", i))
+	}
+	st := x.Capture()
+	small, err := Restore(st, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := small.Capture().Seen; fmt.Sprint(got) != "[o6 o7 o8 o9]" {
+		t.Fatalf("debe conservar los 4 más recientes en orden: %v", got)
+	}
+	big, _ := Restore(st, 1000)
+	if big.SeenCount() != 10 {
+		t.Fatalf("got %d", big.SeenCount())
 	}
 }

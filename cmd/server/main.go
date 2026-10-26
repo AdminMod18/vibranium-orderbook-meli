@@ -63,7 +63,13 @@ func main() {
 	if snapEvery > 0 {
 		snapPath = envStr("SNAPSHOT_PATH", filepath.Join(filepath.Dir(journalPath), "snapshot.bin"))
 	}
-	ex, jr, rep, err := recovery.Recover(journalPath, snapPath, journal.Options{NoSync: os.Getenv("JOURNAL_NOSYNC") == "1"}, log)
+	// Ventana de idempotencia: cuántos ids recientes se recuerdan para rechazar reintentos (409).
+	// Acota la memoria, el tamaño del snapshot y el arranque. IDEMPOTENCY_WINDOW=0 = sin límite (no recomendado).
+	idemWindow := 5_000_000
+	if v, err := strconv.Atoi(os.Getenv("IDEMPOTENCY_WINDOW")); err == nil && v >= 0 {
+		idemWindow = v
+	}
+	ex, jr, rep, err := recovery.Recover(journalPath, snapPath, journal.Options{NoSync: os.Getenv("JOURNAL_NOSYNC") == "1"}, idemWindow, log)
 	if err != nil {
 		log.Error("no se pudo recuperar; se aborta para no operar con estado inválido", "err", err)
 		os.Exit(1)
@@ -72,6 +78,10 @@ func main() {
 		"registros_reproducidos", rep.Replayed, "last_seq", rep.LastSeq, "truncated_bytes", rep.TruncatedBytes, "took", rep.Took.String())
 	met.GaugeFunc("recovery_seconds", "Duración de la última recuperación al arrancar.", func() float64 { return rep.Took.Seconds() })
 	met.GaugeFunc("recovery_replayed_records", "Registros del journal reproducidos al arrancar.", func() float64 { return float64(rep.Replayed) })
+
+	met.GaugeFunc("idempotency_window_size", "Ids de órdenes recordados para detectar reintentos.", func() float64 { return float64(ex.SeenCount()) })
+	met.GaugeFunc("idempotency_window_limit", "Tamaño máximo de la ventana de idempotencia (0 = sin límite).", func() float64 { return float64(ex.SeenLimit()) })
+	met.CounterFunc("idempotency_evicted_total", "Ids olvidados por salir de la ventana de idempotencia.", func() float64 { return float64(ex.SeenEvicted()) })
 
 	opts := []sequencer.Option{sequencer.WithJournal(jr), sequencer.WithObserver(met)}
 	if snapEvery > 0 {

@@ -39,7 +39,7 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 | D15 | **Reservar fondos al ingresar la orden** (BRL en compras, VIB en ventas) | Impide gastar dos veces el mismo saldo; una orden puede esperar minutos en el libro | Validar al ejecutar: los trades fallarían en la liquidación | ✅ |
 | D16 | Orden = **reservar → cruzar → liquidar** en un mismo goroutine | Nadie ve estados intermedios; no hacen falta transacciones distribuidas | Saga entre servicios: necesaria si billetera y libro fueran servicios separados | ✅ |
 | D17 | Mejora de precio: se **devuelve al comprador** `(límite − precio_trade) × qty` | Reservó a su límite pero pagó el precio del maker | — | ✅ |
-| D18 | **Idempotencia por `order_id`**; id repetido ⇒ `409 Conflict` | Un reintento del cliente no puede duplicar la orden (los bots reintentan) | Devolver el resultado original en el reintento (más correcto, requiere guardar resultados) | 🟡 limitación conocida, ver L2 |
+| D18 | **Idempotencia por `order_id`**; id repetido ⇒ `409 Conflict` (dentro de la ventana, ver D57) | Un reintento del cliente no puede duplicar la orden (los bots reintentan) | Devolver el resultado original en el reintento (más correcto, requiere guardar resultados) | 🟡 limitación conocida, ver L2 |
 | D19 | Inconsistencia al liquidar ⇒ **`panic`** (se detiene el proceso) | Es un bug, no un error de usuario; mejor parar y recuperar desde el log que operar con saldos corruptos | Seguir y registrar el error: arriesga dinero | ✅ |
 | D20 | **Sin comisiones (fees)** | MVP | Tercera pata en `Settle` hacia una cuenta de la plataforma | 🟡 |
 | D21 | Billeteras se crean por **depósito** (`POST /deposits`), sin registro/login | El desafío indica que no hace falta; sirve para sembrar saldos en la demo | — | ✅ |
@@ -96,6 +96,15 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 | D55 | **Snapshot final en el apagado ordenado**; periódico cada `SNAPSHOT_EVERY` registros (200.000) | Un deploy/reinicio normal no reproduce nada | Solo periódico: reinicios normales con cola | ✅ |
 | D56 | **Invariante de conservación permanente**: suma de todos los saldos == total depositado (en `CheckInvariants`, `/audit` y al restaurar) | Hallazgo de las pruebas: un snapshot con +777 reales de la nada **no se detectaba**; solo se comprobaba que no hubiera negativos y que las reservas cuadraran | Comprobar solo en tests antes/después | ✅ |
 
+## Idempotencia con ventana (D57)
+
+| # | Decisión | Por qué | Alternativas / costo | Estado |
+|---|---|---|---|---|
+| D57 | **Idempotencia con ventana**: se recuerdan solo los últimos `IDEMPOTENCY_WINDOW` ids aceptados (por defecto **5.000.000**) | Sin límite, la memoria, el snapshot y el arranque crecían para siempre (≈430 M ids/día a 5.000/s). Medido: **≈85-97 bytes por id**; 5 M ids ≈ **409 MiB**; copiar 5 M ids para un snapshot = **19 ms** | Recordar todo: crece sin límite. TTL por reloj: rompe el determinismo del journal. Guardar solo un hash de 8 bytes: menos memoria pero con riesgo (mínimo) de colisión | ✅ |
+| D58 | La ventana se mide en **cantidad de órdenes aceptadas, no en tiempo** | Depende solo de la secuencia de comandos ⇒ reproducir el journal reconstruye exactamente lo mismo. A 5.000/s, 5 M ≈ 17 min; a 500/s ≈ 2,8 h (la cobertura en tiempo depende del ritmo) | Ventana por reloj: reinicios olvidarían ids distintos | ✅ |
+| D59 | Un id fuera de la ventana **se acepta como orden nueva**; pero si su orden **sigue en el libro**, el libro la rechaza igual (409, sin dejar reservas colgadas) | Un cliente real reintenta a los segundos o minutos; esta es la contrapartida estándar de toda API con claves de idempotencia (p. ej. 24 h en pagos). Que la orden siga abierta se protege siempre | Ventana infinita (D18 original) | ✅ |
+| D60 | Al **reproducir el journal no se comprueba la ventana** (`ReplayOrder`) | El journal solo contiene lo que se aceptó, aunque la ventana fuera otra. **Cambiar `IDEMPOTENCY_WINDOW` entre reinicios nunca impide arrancar.** Una mutación de prueba demostró que, si la reproducción comprobara duplicados, un reinicio con otra ventana fallaría con "la reproducción divergió" | Comprobar y fallar: un cambio de configuración dejaría el servicio caído | ✅ |
+
 ## Plataforma
 
 | # | Decisión | Por qué | Estado |
@@ -128,6 +137,6 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 - **L9 — El proyector relee el journal desde el inicio al arrancar** (salta lo ya reflejado). Es O(tamaño del log); con segmentos rotados + índice sería O(1). Ver `MEJORAS.md`.
 - **L10 — Las cifras de rendimiento se midieron en una máquina de 4 núcleos compartida** con disco virtual. Son una referencia, no una garantía; ver `OBSERVABILIDAD.md` (condiciones y colas largas bajo contención). Repetir en la máquina de la presentación.
 - **L11 — Sin trazas distribuidas.** Hay métricas y logs con `request_id`, pero no OpenTelemetry (ver `MEJORAS.md`).
-- **L12 — El conjunto de ids vistos (idempotencia) crece SIN LÍMITE.** Cada orden aceptada deja su id en memoria y en el snapshot (≈40 bytes/id en el snapshot; el snapshot de 816.904 órdenes pesó 33 MiB y cargarlo toma ~1 s). A 5.000 órdenes/s son ≈430 millones de ids al día. Mitigación prevista: **ventana de idempotencia con TTL** (p. ej. 24 h, como hacen las APIs de pagos), expulsando ids antiguos. Afecta memoria, tamaño del snapshot y tiempo de arranque.
+- ~~**L12 — El conjunto de ids vistos crecía sin límite.**~~ **Resuelta con D57** (ventana de idempotencia): memoria, snapshot y arranque quedan acotados. Queda la contrapartida de diseño: un reintento posterior a la ventana se trata como orden nueva (ver D57).
 - **L13 — El journal crece sin rotación**: ≈356 bytes por registro (815.000 registros = 290 MiB) ⇒ a 5.000/s ≈ 150 GB al día. Con snapshots ya es posible **truncar/archivar** lo anterior al último snapshot; falta implementar la rotación por segmentos.
-- **L14 — La pausa del snapshot crece con el estado**: medida en 25-35 ms (hasta ~120 ms con contención) para 800.000 ids y 170.000 órdenes. Mitigaciones: menor frecuencia, acotar el conjunto de ids (L12), o copy-on-write.
+- **L14 — La pausa del snapshot crece con el estado**: la parte de ids ya NO pesa (copiar 5.000.000 ids cuesta 19 ms: es un copiado de memoria, no un recorrido del mapa); queda la copia de las órdenes del libro y las billeteras. Medido antes de D57: 25-35 ms (hasta ~120 ms con contención) con 800.000 ids y 170.000 órdenes.

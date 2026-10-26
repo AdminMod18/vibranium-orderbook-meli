@@ -40,11 +40,13 @@ type env struct {
 }
 
 // start arranca un sistema con persistencia y snapshots cada "every" registros.
-func start(t *testing.T, every uint64) *env {
+func start(t *testing.T, every uint64) *env { return startWindow(t, every, 0) }
+
+func startWindow(t *testing.T, every uint64, window int) *env {
 	t.Helper()
 	e := &env{dir: t.TempDir()}
 	e.jpath, e.spath = filepath.Join(e.dir, "journal.log"), filepath.Join(e.dir, "snapshot.bin")
-	ex, jr, _, err := recovery.Recover(e.jpath, e.spath, journal.Options{}, quiet)
+	ex, jr, _, err := recovery.Recover(e.jpath, e.spath, journal.Options{}, window, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +100,7 @@ func copyFile(t *testing.T, from, to string) {
 
 func recoverAt(t *testing.T, jpath, spath string) (*exchange.Exchange, recovery.Report) {
 	t.Helper()
-	ex, jr, rep, err := recovery.Recover(jpath, spath, journal.Options{}, quiet)
+	ex, jr, rep, err := recovery.Recover(jpath, spath, journal.Options{}, 0, quiet)
 	if err != nil {
 		t.Fatalf("recuperación: %v", err)
 	}
@@ -239,7 +241,7 @@ func TestChainedRestartsStayConsistent(t *testing.T) {
 	e.jr.Close()
 
 	for round := 0; round < 3; round++ {
-		ex, jr, _, err := recovery.Recover(e.jpath, e.spath, journal.Options{}, quiet)
+		ex, jr, _, err := recovery.Recover(e.jpath, e.spath, journal.Options{}, 0, quiet)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -257,4 +259,59 @@ func TestChainedRestartsStayConsistent(t *testing.T) {
 		}
 		mustEqual(t, want, got, fmt.Sprintf("ronda %d", round))
 	}
+}
+
+// Cambiar el tamaño de la ventana entre ejecuciones NO puede impedir arrancar ni cambiar el estado
+// del libro y las billeteras: el journal solo contiene lo que se aceptó, aunque la ventana fuera otra.
+func TestChangingTheWindowNeverBlocksStartup(t *testing.T) {
+	for _, withSnapshot := range []bool{true, false} {
+		e := startWindow(t, 100, 3) // ventana diminuta en la ejecución original
+		ctx := context.Background()
+		_ = e.seq.Deposit(ctx, "alice", 1_000_000, 0)
+		place := func(id string) {
+			if _, err := e.seq.PlaceOrder(ctx, domain.Order{ID: id, UserID: "alice", Side: domain.Buy, Price: 10, Qty: 1}); err != nil {
+				t.Fatalf("%s: %v", id, err)
+			}
+			if _, err := e.seq.Cancel(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		place("x")
+		for _, id := range []string{"y1", "y2", "y3", "y4"} { // sacan a "x" de la ventana de 3
+			place(id)
+		}
+		place("x") // el MISMO id otra vez: con la ventana original se aceptó, así que quedó en el journal dos veces
+		e.seq.Stop()
+		want := normalized(e.ex)
+		want.Seen = nil
+		e.jr.Close()
+		if !withSnapshot {
+			_ = os.Remove(e.spath)
+		}
+
+		for _, window := range []int{0, 1, 3, 1000} {
+			ex, rep := recoverWindow(t, e.jpath, e.spath, window)
+			got := normalized(ex)
+			if withSnapshot != rep.FromSnapshot {
+				t.Fatalf("snapshot=%v pero FromSnapshot=%v", withSnapshot, rep.FromSnapshot)
+			}
+			if window > 0 && len(got.Seen) > window {
+				t.Fatalf("ventana %d: quedaron %d ids", window, len(got.Seen))
+			}
+			got.Seen = nil
+			if !reflect.DeepEqual(want, got) {
+				t.Fatalf("ventana %d (snapshot=%v): el estado difiere", window, withSnapshot)
+			}
+		}
+	}
+}
+
+func recoverWindow(t *testing.T, jpath, spath string, window int) (*exchange.Exchange, recovery.Report) {
+	t.Helper()
+	ex, jr, rep, err := recovery.Recover(jpath, spath, journal.Options{}, window, quiet)
+	if err != nil {
+		t.Fatalf("la recuperación con ventana %d falló: %v", window, err)
+	}
+	t.Cleanup(func() { jr.Close() })
+	return ex, rep
 }

@@ -66,7 +66,7 @@ func Apply(x *exchange.Exchange, rec Record) error {
 		if err != nil {
 			return err
 		}
-		res, err := x.PlaceOrder(domain.Order{
+		res, err := x.ReplayOrder(domain.Order{
 			ID: rec.Order.ID, UserID: rec.Order.UserID, Side: side,
 			Price: domain.Price(rec.Order.Price), Qty: domain.Qty(rec.Order.Qty),
 		})
