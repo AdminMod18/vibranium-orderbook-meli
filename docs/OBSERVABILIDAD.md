@@ -1,7 +1,7 @@
 # Observabilidad
 
 ![Dashboard de Grafana](img/dashboard-grafana.png)
-*Dashboard real tras una prueba de carga de 5.000 órdenes/s (y un corte de Postgres a mitad de la prueba).*
+*Dashboard «Vibranium Order Book — Panel de control» durante una carga con JMeter (≈ 4.000 órdenes/s con validación de negocio).*
 
 ## ¿Prometheus o Grafana? Los dos, porque hacen cosas distintas
 | | **Prometheus** | **Grafana** |
@@ -26,6 +26,20 @@ Generar tráfico para ver el dashboard moverse (no requiere Go):
 ```bash
 docker compose run --rm loadgen -rate 5000 -duration 30s
 ```
+
+## El dashboard de Grafana (43 paneles en 8 secciones)
+Se genera con `python3 ops/grafana/generate_dashboard.py` (las consultas PromQL se revisan como código) y se provisiona solo desde `ops/grafana/dashboards/orderbook.json`. Arriba hay un selector de **ventana de cálculo** (30 s, 1 m, 5 m) que usan todas las tasas y percentiles. Cada panel tiene un ⓘ con qué mide y cómo leerlo, y las gráficas muestran en la leyenda el **último valor, el promedio y el máximo** del periodo.
+
+| Sección | Qué responde |
+|---|---|
+| 1 · Estado general | 12 indicadores en verde/amarillo/rojo: órdenes/s, trades/s, p50/p95/p99, rechazos 503, errores 5xx, ocupación de cola, cancelaciones, lag del historial, estado de Postgres, disco libre |
+| 2 · Tráfico de órdenes | órdenes por resultado, compra vs venta, trades y volumen (unidades y R$), respuestas por código HTTP, uso por ruta, cancelaciones |
+| 3 · Latencia | percentiles p50→p99.9, mapa de calor de la distribución, p95 por ruta, desglose cola · matching · fsync · HTTP |
+| 4 · Secuenciador y cola | profundidad, rechazos/descartes, espera en cola, group commit, duración de matching y fsync, peticiones en curso |
+| 5 · Persistencia | crecimiento y tamaño del journal, espacio libre, fsync/s, antigüedad y pausa de los snapshots, tiempo de recuperación |
+| 6 · Memoria y GC | heap y RSS, pausa del GC, ciclos de GC y goroutines |
+| 7 · Historial en Postgres | lag, journal vs historial, errores y relecturas del proyector |
+| 8 · Idempotencia | ventana de ids recordados y expulsiones |
 
 ## Catálogo de métricas (cada una responde una pregunta)
 | Métrica | Pregunta que responde |
