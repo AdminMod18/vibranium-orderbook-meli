@@ -1,0 +1,9 @@
+# ./scripts/latency-breakdown.sh 12   (tras la corrida e5: 10 min a 5.000/s con Postgres activo, estado fresco)
+Latencia por etapa, últimos 12 min (ventanas de 1 min, muestreo cada 15 s). Valores en ms.
+etapa                                     p50 típico   p50 máx  p99 típico   p99 máx  p99.9 típico  p99.9 máx
+cola (espera antes de ejecutarse)               0.31      0.39        9.15     20.90         95.02     234.53
+matching + liquidación del lote                 0.03      0.04        0.45      0.75          1.96       2.44
+fsync del journal (por lote)                    0.38      0.41        3.29      4.19          8.83      14.29
+HTTP completo POST /orders                      1.03      1.44       21.61     34.86        158.13     393.84
+
+Comandos por fsync (group commit), mediana de p50: 1.6

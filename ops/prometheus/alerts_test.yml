@@ -1,0 +1,321 @@
+# Pruebas unitarias de las reglas de alerta (promtool): cada alerta se prueba con series sintéticas, en un caso que
+# DEBE dispararla y, cuando importa, en otro que NO debe. Se ejecutan con ./scripts/test-alerts.sh (usa Docker).
+# Las anotaciones esperadas deben coincidir con las de alerts.yml: si se edita el texto de una alerta, actualizar aquí.
+rule_files:
+- alerts.yml
+evaluation_interval: 1m
+tests:
+- name: OrderbookDown
+  input_series:
+  - series: up{job="orderbook"}
+    values: '0x15'
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: OrderbookDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        job: orderbook
+      exp_annotations:
+        summary: El order book no responde al scrape
+        runbook: docker compose ps / logs orderbook. Si reinició, revisar 'journal recuperado' en los logs.
+  interval: 1m
+- name: 'OrderbookDown: sano no alerta'
+  input_series:
+  - series: up{job="orderbook"}
+    values: 1x15
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: OrderbookDown
+    exp_alerts: []
+  interval: 1m
+- name: QueueNearlyFull
+  input_series:
+  - series: orderbook_queue_depth
+    values: 9000x15
+  - series: orderbook_queue_capacity
+    values: 10000x15
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: QueueNearlyFull
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: La cola del secuenciador supera el 80%
+        description: 'El matching no da abasto con la entrada: pronto habrá 503. Ver latencia de fsync y CPU.'
+  interval: 1m
+- name: 'QueueNearlyFull: cola holgada no alerta'
+  input_series:
+  - series: orderbook_queue_depth
+    values: 1000x15
+  - series: orderbook_queue_capacity
+    values: 10000x15
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: QueueNearlyFull
+    exp_alerts: []
+  interval: 1m
+- name: BackpressureActive
+  input_series:
+  - series: orderbook_queue_rejected_total
+    values: 0+10x15
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: BackpressureActive
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: Se están rechazando órdenes por cola llena (HTTP 503)
+  interval: 1m
+- name: 'BackpressureActive: sin rechazos no alerta'
+  input_series:
+  - series: orderbook_queue_rejected_total
+    values: '0x15'
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: BackpressureActive
+    exp_alerts: []
+  interval: 1m
+- name: ExpiredCommands
+  input_series:
+  - series: orderbook_queue_expired_total
+    values: 0+3x15
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: ExpiredCommands
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: Se descartan comandos cuyo cliente ya no esperaba (timeout/desconexión)
+        description: 'La espera en cola supera el plazo de la request (2 s): el motor no da abasto o hay clientes impacientes. Ver espera en cola y fsync. Estas órdenes NO se ejecutan.'
+  interval: 1m
+- name: 'ExpiredCommands: sin descartes no alerta'
+  input_series:
+  - series: orderbook_queue_expired_total
+    values: '0x15'
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: ExpiredCommands
+    exp_alerts: []
+  interval: 1m
+- name: FsyncSlow (casi todo entre 50 y 250 ms)
+  input_series:
+  - series: orderbook_journal_fsync_seconds_bucket{le="0.05"}
+    values: '0x15'
+  - series: orderbook_journal_fsync_seconds_bucket{le="0.25"}
+    values: 0+100x15
+  - series: orderbook_journal_fsync_seconds_bucket{le="+Inf"}
+    values: 0+100x15
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: FsyncSlow
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: p99 de fsync del journal > 50 ms
+        description: 'El disco es el cuello de botella: todas las órdenes esperan este fsync.'
+  interval: 1m
+- name: 'FsyncSlow: fsync rápido (<10 ms) no alerta'
+  input_series:
+  - series: orderbook_journal_fsync_seconds_bucket{le="0.01"}
+    values: 0+100x15
+  - series: orderbook_journal_fsync_seconds_bucket{le="0.05"}
+    values: 0+100x15
+  - series: orderbook_journal_fsync_seconds_bucket{le="+Inf"}
+    values: 0+100x15
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: FsyncSlow
+    exp_alerts: []
+  interval: 1m
+- name: OrderLatencyHigh (p99 ≈ 1 s)
+  input_series:
+  - series: orderbook_http_request_duration_seconds_bucket{route="POST /orders",le="0.1"}
+    values: '0x15'
+  - series: orderbook_http_request_duration_seconds_bucket{route="POST /orders",le="1"}
+    values: 0+100x15
+  - series: orderbook_http_request_duration_seconds_bucket{route="POST /orders",le="+Inf"}
+    values: 0+100x15
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: OrderLatencyHigh
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: p99 de POST /orders > 250 ms
+  interval: 1m
+- name: 'OrderLatencyHigh: rápido no alerta'
+  input_series:
+  - series: orderbook_http_request_duration_seconds_bucket{route="POST /orders",le="0.01"}
+    values: 0+100x15
+  - series: orderbook_http_request_duration_seconds_bucket{route="POST /orders",le="+Inf"}
+    values: 0+100x15
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: OrderLatencyHigh
+    exp_alerts: []
+  interval: 1m
+- name: ServerErrors (5xx)
+  input_series:
+  - series: orderbook_http_requests_total{route="POST /orders",method="POST",code="5xx"}
+    values: 0+5x15
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: ServerErrors
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+      exp_annotations:
+        summary: El servicio devuelve errores 5xx/504 (distintos de 503 por backpressure)
+  interval: 1m
+- name: 'ServerErrors: el 503 de backpressure NO es un error del servidor'
+  input_series:
+  - series: orderbook_http_requests_total{route="POST /orders",method="POST",code="503"}
+    values: 0+500x15
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: ServerErrors
+    exp_alerts: []
+  interval: 1m
+- name: ProjectorDown
+  input_series:
+  - series: orderbook_projector_up
+    values: '0x15'
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: ProjectorDown
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: El historial en Postgres no se está actualizando
+        description: El MERCADO no se ve afectado (el journal es la fuente de verdad). Revisar Postgres y los logs del proyector.
+  interval: 1m
+- name: 'ProjectorDown: sano no alerta'
+  input_series:
+  - series: orderbook_projector_up
+    values: 1x15
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: ProjectorDown
+    exp_alerts: []
+  interval: 1m
+- name: ProjectorLagging
+  input_series:
+  - series: orderbook_projector_lag
+    values: 20000x15
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: ProjectorLagging
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: El historial atrasa más de 10.000 registros
+  interval: 1m
+- name: 'ProjectorLagging: lag normal no alerta'
+  input_series:
+  - series: orderbook_projector_lag
+    values: 200x15
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: ProjectorLagging
+    exp_alerts: []
+  interval: 1m
+- name: SnapshotFailing
+  input_series:
+  - series: orderbook_snapshot_failures_total
+    values: 0 0 0 1 1 1 1 1
+  alert_rule_test:
+  - eval_time: 4m
+    alertname: SnapshotFailing
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: Falló la escritura de un snapshot
+        description: No se pierde nada (el journal es la fuente de verdad) pero el próximo reinicio sería lento. Revisar disco y permisos.
+  interval: 1m
+- name: SnapshotStale
+  input_series:
+  - series: orderbook_snapshot_age_records
+    values: 2000000x15
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: SnapshotStale
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: El último snapshot tiene más de 1.000.000 de registros de antigüedad
+        description: Un reinicio ahora tendría que reproducir esa cola (~8 s por millón de registros).
+  interval: 1m
+- name: 'SnapshotStale: reciente no alerta'
+  input_series:
+  - series: orderbook_snapshot_age_records
+    values: 50000x15
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: SnapshotStale
+    exp_alerts: []
+  interval: 1m
+- name: JournalDiskLow (1 GiB libres)
+  input_series:
+  - series: orderbook_journal_disk_free_bytes
+    values: 1000000000x15
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: JournalDiskLow
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+      exp_annotations:
+        summary: Quedan menos de 2 GiB libres donde vive el journal
+        description: 'Con ~356 bytes por registro son unos 5,6 millones de órdenes (~19 min a 5.000/s). Con el disco lleno el servicio hace fail-stop: liberar espacio o archivar el journal ya.'
+  interval: 1m
+- name: 'JournalDiskLow: 50 GB libres no alerta'
+  input_series:
+  - series: orderbook_journal_disk_free_bytes
+    values: 50000000000x15
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: JournalDiskLow
+    exp_alerts: []
+  interval: 1m
+- name: 'JournalDiskLow: NaN (plataforma sin soporte) no alerta'
+  input_series:
+  - series: orderbook_journal_disk_free_bytes
+    values: NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: JournalDiskLow
+    exp_alerts: []
+  interval: 1m
+- name: JournalDiskFillingUp (1 GB/min de consumo)
+  input_series:
+  - series: orderbook_journal_disk_free_bytes
+    values: 100000000000-1000000000x50
+  alert_rule_test:
+  - eval_time: 45m
+    alertname: JournalDiskFillingUp
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: A este ritmo el disco del journal se llena en menos de 6 horas
+        description: El journal crece sin rotación (L13). Planificar archivado/rotación o ampliar el volumen.
+  interval: 1m
+- name: 'JournalDiskFillingUp: disco estable no alerta'
+  input_series:
+  - series: orderbook_journal_disk_free_bytes
+    values: 100000000000x50
+  alert_rule_test:
+  - eval_time: 45m
+    alertname: JournalDiskFillingUp
+    exp_alerts: []
+  interval: 1m

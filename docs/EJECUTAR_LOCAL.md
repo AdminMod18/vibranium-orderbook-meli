@@ -66,9 +66,9 @@ Precios en **centavos** de real; cantidades en **unidades** de Vibranium.
 
 ## 2b) Todo de una vez
 ```bash
-./scripts/verify-all.sh      # tests + stack desde cero + smoke + carga a 5.000/s + 5 drills; termina con una tabla PASS/FAIL
+./scripts/verify-all.sh      # tests + stack desde cero + smoke + carga a 5.000/s + 6 drills; termina con una tabla PASS/FAIL
 ```
-**Atención:** reinicia el stack y **borra los datos locales** (`down -v`). Con `SKIP_GO=1` se omiten los pasos que requieren Go.
+**Atención:** reinicia el stack y **borra los datos locales** (`down -v`): por eso **pide que escribas `SI`** antes de empezar (`ASSUME_YES=1` para automatizar). Con `SKIP_GO=1` se omiten los pasos que requieren Go.
 
 ## 2c) Ensayar la demo
 ```bash
@@ -80,13 +80,18 @@ docker compose down -v && docker compose up -d   # libro vacío
 Con el stack arriba:
 ```bash
 ./scripts/drill-docker-crash.sh        # mata la app en plena carga; se recupera desde el journal
-./scripts/drill-postgres-down.sh       # (antes: docker compose stop orderbook) Postgres cae; el matching sigue
+./scripts/drill-postgres-down.sh       # (antes: docker compose stop orderbook) Postgres cae; el matching sigue. Vacía el historial: pide confirmación
 ```
 Los drills de arriba usan Docker + `curl`. Este otro necesita **Go** instalado:
 ```bash
 ./scripts/drill-kill9.sh               # kill -9 al servidor (sin Docker) y verificación de saldos
 ./scripts/drill-overload.sh            # sobrecarga: cola diminuta + 512 clientes => 503, sin perder nada
 ./scripts/drill-idempotency.sh         # ventana de idempotencia y reinicios con otra ventana
+./scripts/drill-single-instance.sh     # un 2º proceso sobre el mismo journal se rechaza; --docker prueba un 2º contenedor
+./scripts/test-alerts.sh               # pruebas unitarias de las reglas de alerta (usa Docker, no toca datos)
+./scripts/seed.sh                       # OPCIONAL: fondea billeteras (alice..erin con R$ 1.000.000 y 1.000 VIB); --count N, --brl, --vib; ver ./scripts/seed.sh -h
+./scripts/latency-breakdown.sh 10         # tras una carga: ¿dónde se va el tiempo? (cola, matching, fsync, HTTP); usa Prometheus
+./scripts/soak.sh 20 5000              # RESISTENCIA: 20 min a 5.000/s; escribe varios GB (journal + Postgres ≈ 1 KB por orden); pide confirmación
 go test -race ./...                    # toda la batería de tests
 ```
 > En Docker Desktop el proceso de la app vive dentro de una VM: el drill usa `docker kill` y reinicia a mano

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -51,11 +52,17 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()}))
 	met := metrics.New(version)
 	addr := ":" + strconv.Itoa(envInt("PORT", 8080))
-	queueSize := envInt("QUEUE_SIZE", 50_000)
+	// Cola ≈ ritmo × plazo de la request (2 s): una cola mayor solo hace esperar a los clientes lo que luego
+	// será un 504, en vez de decirles 503 al instante. 10.000 ≈ 2 s a 5.000 órdenes/s.
+	queueSize := envInt("QUEUE_SIZE", 10_000)
 
 	// Recuperación: snapshot + cola del journal (o el journal completo si no hay snapshot utilizable).
 	journalPath := envStr("JOURNAL_PATH", "data/journal.log")
-	snapEvery := 200_000 // registros entre snapshots; SNAPSHOT_EVERY=0 los desactiva
+	// Registros entre snapshots; SNAPSHOT_EVERY=0 los desactiva. Cada snapshot FRENA al secuenciador mientras copia el
+	// estado (≈ 0,2 s por millón de órdenes en el libro) y esa pausa es lo que domina el p99 con estado grande: medido
+	// con 5.000/s, p99 = 12 ms sin snapshots, 101-342 ms cada 200.000 y 47 ms cada 1.000.000. El costo de espaciarlos es
+	// una cola de hasta ~1 M de registros que reproducir tras un crash (≈ 9 s). Ver docs/OPTIMIZACION.md.
+	snapEvery := 1_000_000
 	if v, err := strconv.Atoi(os.Getenv("SNAPSHOT_EVERY")); err == nil && v >= 0 {
 		snapEvery = v
 	}
@@ -71,7 +78,11 @@ func main() {
 	}
 	ex, jr, rep, err := recovery.Recover(journalPath, snapPath, journal.Options{NoSync: os.Getenv("JOURNAL_NOSYNC") == "1"}, idemWindow, log)
 	if err != nil {
-		log.Error("no se pudo recuperar; se aborta para no operar con estado inválido", "err", err)
+		if errors.Is(err, journal.ErrLocked) {
+			log.Error("OTRA instancia ya está usando este journal; se aborta para no corromperlo. Detenga la otra instancia o use otro JOURNAL_PATH", "err", err)
+		} else {
+			log.Error("no se pudo recuperar; se aborta para no operar con estado inválido", "err", err)
+		}
 		os.Exit(1)
 	}
 	log.Info("recuperación completa", "path", journalPath, "desde_snapshot", rep.FromSnapshot, "snapshot_seq", rep.SnapshotSeq,
@@ -105,6 +116,16 @@ func main() {
 	met.GaugeFunc("queue_depth", "Comandos esperando en la cola del secuenciador.", func() float64 { return float64(seq.QueueLen()) })
 	met.GaugeFunc("queue_capacity", "Capacidad de la cola del secuenciador.", func() float64 { return float64(seq.QueueCap()) })
 	met.CounterFunc("queue_rejected_total", "Comandos rechazados por cola llena (HTTP 503).", func() float64 { return float64(seq.Overloaded()) })
+	// Espacio libre donde vive el journal: con el disco lleno el servicio hace fail-stop (no puede persistir).
+	// NaN = la plataforma no lo informa (ninguna alerta se dispara con NaN).
+	journalDir := filepath.Dir(journalPath)
+	met.GaugeFunc("journal_disk_free_bytes", "Bytes libres en el sistema de archivos del journal.", func() float64 {
+		if v, err := journal.DiskFree(journalDir); err == nil {
+			return float64(v)
+		}
+		return math.NaN()
+	})
+	met.CounterFunc("queue_expired_total", "Comandos descartados sin ejecutar porque su cliente ya no esperaba (timeout/desconexión).", func() float64 { return float64(seq.Expired()) })
 	met.CounterFunc("commands_processed_total", "Comandos ejecutados por el secuenciador.", func() float64 { return float64(seq.Processed()) })
 	met.GaugeFunc("journal_last_seq", "Último registro confirmado en el journal.", func() float64 { return float64(jr.LastSeq()) })
 	met.GaugeFunc("journal_bytes", "Tamaño del journal en bytes.", func() float64 { return float64(jr.Bytes()) })
@@ -125,6 +146,7 @@ func main() {
 		defer st.Close()
 		handler = handler.WithHistory(st)
 		proj = history.NewProjector(st, journalPath, log)
+		proj.SetDurable(jr.DurableBytes) // el historial solo refleja lo que ya está sincronizado en disco
 		go func() { proj.Run(projCtx); close(projDone) }()
 		met.GaugeFunc("projector_seq", "Último registro del journal reflejado en Postgres.", func() float64 { return float64(proj.ProjectedSeq()) })
 		met.GaugeFunc("projector_lag", "Registros del journal aún no reflejados en Postgres.", func() float64 {
@@ -136,6 +158,7 @@ func main() {
 			}
 			return 0
 		})
+		met.CounterFunc("projector_rescanned_records_total", "Registros ya reflejados que el proyector volvió a leer al arrancar (1 = reanudó por offset; ≈ todo el journal = tuvo que releerlo).", func() float64 { return float64(proj.Rescanned()) })
 		met.CounterFunc("projector_failures_total", "Errores del proyector (Postgres caído, etc.).", func() float64 { return float64(proj.Failures()) })
 		log.Info("historial en Postgres habilitado")
 	} else {

@@ -13,6 +13,11 @@ import (
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/journal"
 )
 
+// ErrHistoryAhead: Postgres refleja más registros de los que tiene el journal. Es imposible en una operación
+// correcta (el proyector solo lee lo ya sincronizado), así que indica que el journal retrocedió o que se
+// restauró una copia antigua. Proyectar así saltaría en silencio las órdenes nuevas.
+var ErrHistoryAhead = errors.New("el historial de Postgres está por delante del journal")
+
 const (
 	readBatch    = 5000
 	pollInterval = 50 * time.Millisecond
@@ -30,22 +35,34 @@ const (
 // Como solo depende del archivo del journal, puede ejecutarse como proceso aparte (o sustituirse
 // por un consumidor de Kafka) sin tocar el motor.
 type Projector struct {
-	store *Store
-	path  string
-	log   *slog.Logger
+	store   *Store
+	path    string
+	log     *slog.Logger
+	durable func() int64 // si no es nil: solo se lee hasta el offset ya sincronizado en disco
 
 	projected atomic.Uint64 // último seq reflejado en Postgres
 	healthy   atomic.Bool
 	failures  atomic.Uint64
+	rescanned atomic.Uint64 // registros ya reflejados que hubo que volver a leer para llegar al punto de partida
 }
 
 func NewProjector(store *Store, journalPath string, log *slog.Logger) *Projector {
 	return &Projector{store: store, path: journalPath, log: log}
 }
 
+// SetDurable limita la lectura del journal al offset ya sincronizado en disco (Journal.DurableBytes).
+// Sin esto el proyector podría reflejar en Postgres órdenes que un corte de energía borraría del journal
+// (y a las que NUNCA se les respondió al cliente). Debe llamarse antes de Run.
+func (p *Projector) SetDurable(fn func() int64) { p.durable = fn }
+
 func (p *Projector) ProjectedSeq() uint64 { return p.projected.Load() }
 func (p *Projector) Healthy() bool        { return p.healthy.Load() }
 func (p *Projector) Failures() uint64     { return p.failures.Load() }
+
+// Rescanned cuenta los registros ya reflejados que el proyector tuvo que volver a leer (y decodificar) al
+// arrancar. Con reanudación por offset es 1 (el último, para comprobarlo); sin ella era TODO el journal en
+// cada reinicio.
+func (p *Projector) Rescanned() uint64 { return p.rescanned.Load() }
 
 // Run bloquea hasta que ctx se cancele.
 func (p *Projector) Run(ctx context.Context) {
@@ -65,6 +82,7 @@ func (p *Projector) Run(ctx context.Context) {
 		return true
 	}
 
+	resume := true // reanudar desde el offset guardado; si no cuadra con el journal se lee desde el inicio
 	for ctx.Err() == nil {
 		// 1) esquema y punto de partida
 		if err := p.store.Migrate(ctx); err != nil {
@@ -73,7 +91,7 @@ func (p *Projector) Run(ctx context.Context) {
 			}
 			continue
 		}
-		last, err := p.store.LastSeq(ctx)
+		last, offset, err := p.store.Position(ctx)
 		if err != nil {
 			if !fail("proyector: no se pudo leer last_seq", err) {
 				return
@@ -99,19 +117,42 @@ func (p *Projector) Run(ctx context.Context) {
 
 		p.projected.Store(last) // recién ahora el progreso de la BD es "nuestro"
 
-		rd, err := journal.OpenReader(p.path)
+		canResume := resume && offset > 0 && last > 1
+		var rd *journal.Reader
+		if canResume {
+			// `offset` es donde empieza el registro `last`: se vuelve a leer ese (uno solo) para comprobar que el journal
+			// contiene de verdad lo proyectado, y desde ahí se sigue.
+			rd, err = journal.OpenReaderAt(p.path, offset, last-1)
+		} else {
+			rd, err = journal.OpenReader(p.path)
+		}
 		if err != nil {
 			if !fail("proyector: no se pudo abrir el journal", err) {
 				return
 			}
 			continue
 		}
+		if p.durable != nil {
+			rd.SetDurable(p.durable)
+		}
 
 		// 2) bucle principal: leer lote -> escribir transacción -> avanzar
-		err = p.loop(ctx, rd, last, &backoff)
+		err = p.loop(ctx, rd, last, canResume, &backoff)
 		rd.Close()
 		if ctx.Err() != nil {
 			return
+		}
+		if errors.Is(err, errBadResume) {
+			// El offset guardado no corresponde a este journal (archivo más corto, otro contenido o registro que no es
+			// `last`). No se confía en él: se vuelve a leer desde el inicio, que es lo que siempre fue correcto.
+			p.log.Warn("proyector: el offset guardado no coincide con el journal; se lee desde el inicio", "err", err)
+			resume = false
+			continue
+		}
+		if errors.Is(err, ErrHistoryAhead) {
+			p.log.Error("proyector DETENIDO: el historial de Postgres está POR DELANTE del journal (el journal retrocedió o se "+
+				"restauró una copia antigua). No se proyecta nada para no mezclar historias. Si el journal es el correcto, "+
+				"vacíe las tablas del historial para reconstruirlo desde cero", "err", err)
 		}
 		if !fail("proyector: reiniciando tras error", err) {
 			return
@@ -119,19 +160,49 @@ func (p *Projector) Run(ctx context.Context) {
 	}
 }
 
-func (p *Projector) loop(ctx context.Context, rd *journal.Reader, last uint64, backoff *time.Duration) error {
+// errBadResume: la primera lectura tras reanudar desde un offset guardado no cuadró con el journal.
+var errBadResume = errors.New("reanudación inválida")
+
+func (p *Projector) loop(ctx context.Context, rd *journal.Reader, last uint64, resumed bool, backoff *time.Duration) error {
 	var pending []journal.Record
+	var journalLast uint64 // mayor secuencia leída del journal (incluidas las ya reflejadas que se saltan)
+	firstRead := resumed
 	for ctx.Err() == nil {
 		if len(pending) == 0 {
-			if _, err := rd.ReadNew(readBatch, func(r journal.Record) error {
+			n, err := rd.ReadNew(readBatch, func(r journal.Record) error {
+				if r.Seq > journalLast {
+					journalLast = r.Seq
+				}
 				if r.Seq > last { // los ya reflejados se saltan
 					pending = append(pending, r)
+				} else {
+					p.rescanned.Add(1)
 				}
 				return nil
-			}); err != nil {
+			})
+			if err != nil {
+				if firstRead && (errors.Is(err, journal.ErrCorrupt) || errors.Is(err, journal.ErrBehind)) {
+					return fmt.Errorf("%w: %v", errBadResume, err)
+				}
 				return fmt.Errorf("leyendo journal: %w", err)
 			}
+			if firstRead {
+				// Al reanudar, la 1ª lectura DEBE devolver el registro `last` (la continuidad de secuencia ya la verificó
+				// el lector). Si no devuelve nada, el offset apunta al final o más allá del journal: no prueba nada, y
+				// darlo por bueno ocultaría registros nunca proyectados.
+				if n == 0 {
+					return fmt.Errorf("%w: no hay registro en el offset guardado", errBadResume)
+				}
+				firstRead = false
+			}
+			if n > 0 && len(pending) == 0 {
+				continue // solo se saltaron registros ya reflejados: seguir leyendo sin dormir
+			}
 			if len(pending) == 0 {
+				// Al día con lo durable. Postgres jamás puede haber reflejado más de lo que el journal tiene.
+				if last > journalLast {
+					return fmt.Errorf("%w: Postgres refleja hasta el registro %d y el journal solo llega al %d", ErrHistoryAhead, last, journalLast)
+				}
 				p.healthy.Store(true)
 				select {
 				case <-ctx.Done():
@@ -141,7 +212,8 @@ func (p *Projector) loop(ctx context.Context, rd *journal.Reader, last uint64, b
 				continue
 			}
 		}
-		if err := p.store.applyBatch(ctx, pending); err != nil {
+		// ReadNew solo se llama con `pending` vacío, así que el último registro leído es el último del lote.
+		if err := p.store.applyBatch(ctx, pending, rd.LastRecordStart()); err != nil {
 			// El lote se conserva y se reintenta íntegro (la transacción es todo o nada).
 			return fmt.Errorf("aplicando lote de %d registros: %w", len(pending), err)
 		}
@@ -155,7 +227,7 @@ func (p *Projector) loop(ctx context.Context, rd *journal.Reader, last uint64, b
 }
 
 // applyBatch refleja los registros en una sola transacción (con pipeline de sentencias).
-func (s *Store) applyBatch(ctx context.Context, recs []journal.Record) error {
+func (s *Store) applyBatch(ctx context.Context, recs []journal.Record, lastRecordStart int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -192,7 +264,7 @@ func (s *Store) applyBatch(ctx context.Context, recs []journal.Record) error {
 				r.OrderID, r.Order.Filled, ts)
 		}
 	}
-	b.Queue(`UPDATE projector_state SET last_seq = $1 WHERE id = 1`, int64(recs[len(recs)-1].Seq))
+	b.Queue(`UPDATE projector_state SET last_seq = $1, journal_offset = $2 WHERE id = 1`, int64(recs[len(recs)-1].Seq), lastRecordStart)
 
 	br := tx.SendBatch(ctx, b)
 	for i := 0; i < b.Len(); i++ {

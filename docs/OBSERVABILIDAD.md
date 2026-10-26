@@ -42,14 +42,17 @@ docker compose run --rm loadgen -rate 5000 -duration 30s
 | `orderbook_batch_exec_seconds` | ¿Cuánto cuesta el matching en memoria? (casi nada) |
 | `orderbook_journal_last_seq`, `journal_bytes`, `journal_syncs_total` | Ritmo y tamaño del journal |
 | `orderbook_projector_lag`, `projector_up`, `projector_failures_total` | ¿El historial está al día? ¿Postgres está bien? |
+| `orderbook_projector_rescanned_records_total` | Al arrancar: 1 = el proyector reanudó por offset; ≈ todo el journal = tuvo que releerlo (offset inservible o historial antiguo) |
 | `orderbook_snapshot_age_records` / `snapshot_pause_seconds` / `snapshot_write_seconds` / `snapshot_failures_total` | ¿Cuánto habría que reproducir en un reinicio? ¿Cuánto frena el snapshot al secuenciador? |
 | `orderbook_recovery_seconds` / `recovery_replayed_records` | ¿Cuánto tardó el último arranque y qué reprodujo? |
+| `orderbook_queue_expired_total` | ¿Se descartan comandos porque el cliente ya no esperaba? (latencia > plazo) |
+| `orderbook_journal_disk_free_bytes` | ¿Cuánto disco queda para el journal? |
 | `orderbook_idempotency_window_size` / `_limit` / `idempotency_evicted_total` | ¿Cuántos ids recuerda la idempotencia y cuántos se olvidan? (memoria acotada) |
 | `go_*`, `process_*` | Goroutines, memoria, GC, CPU, descriptores |
 
 **Cardinalidad acotada (importante en producción):** la etiqueta `route` usa el *patrón* (`GET /orders/{id}`), no la URL real; mil `order_id` distintos no crean mil series (hay un test que lo verifica).
 
-## Alertas (`ops/prometheus/alerts.yml`, 10 reglas)
+## Alertas (`ops/prometheus/alerts.yml`, 13 reglas)
 | Alerta | Condición | Significa |
 |---|---|---|
 | `OrderbookDown` | `up == 0` 30 s | La app no responde |
@@ -61,9 +64,12 @@ docker compose run --rm loadgen -rate 5000 -duration 30s
 | `ProjectorDown` | proyector no sano 1 min | El **historial** se atrasa; el **mercado no** |
 | `ProjectorLagging` | lag > 10.000 2 min | Historial muy atrasado |
 | `SnapshotFailing` | falló un snapshot en 10 min | No se pierde nada, pero el próximo reinicio sería lento |
+| `JournalDiskLow` | < 2 GiB libres donde vive el journal, 2 min | Con el disco lleno el servicio hace fail-stop |
+| `JournalDiskFillingUp` | el disco se llena en < 6 h (`predict_linear`), 10 min | Hay que archivar/rotar o ampliar el volumen |
+| `ExpiredCommands` | se descartan comandos cuyo cliente ya no esperaba, 1 min | La espera en cola supera el plazo de 2 s; esas órdenes NO se ejecutan |
 | `SnapshotStale` | > 1.000.000 registros sin snapshot, 5 min | Un reinicio ahora reproduciría esa cola (~8 s por millón) |
 
-Se evalúan en Prometheus y se ven en `/alerts`. En producción irían a **Alertmanager → Slack/PagerDuty** (fuera del MVP).
+Se evalúan en Prometheus y se ven en `/alerts`. **Cada regla tiene pruebas unitarias** (`./scripts/test-alerts.sh`, `promtool test rules` con series sintéticas: un caso que DEBE dispararla y, cuando importa, otro que NO). En producción irían a **Alertmanager → Slack/PagerDuty** (fuera del MVP).
 
 ## Logs
 JSON estructurado por línea (`docker compose logs orderbook`). Cada request lleva `X-Request-ID` (se propaga o se genera) y aparece en los logs.

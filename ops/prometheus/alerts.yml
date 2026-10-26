@@ -77,3 +77,27 @@ groups:
         annotations:
           summary: "El último snapshot tiene más de 1.000.000 de registros de antigüedad"
           description: "Un reinicio ahora tendría que reproducir esa cola (~8 s por millón de registros)."
+
+      - alert: JournalDiskLow
+        expr: orderbook_journal_disk_free_bytes < 2 * 1024 * 1024 * 1024
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Quedan menos de 2 GiB libres donde vive el journal"
+          description: "Con ~356 bytes por registro son unos 5,6 millones de órdenes (~19 min a 5.000/s). Con el disco lleno el servicio hace fail-stop: liberar espacio o archivar el journal ya."
+
+      - alert: JournalDiskFillingUp
+        expr: predict_linear(orderbook_journal_disk_free_bytes[30m], 6 * 3600) < 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "A este ritmo el disco del journal se llena en menos de 6 horas"
+          description: "El journal crece sin rotación (L13). Planificar archivado/rotación o ampliar el volumen."
+
+      - alert: ExpiredCommands
+        expr: rate(orderbook_queue_expired_total[1m]) > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "Se descartan comandos cuyo cliente ya no esperaba (timeout/desconexión)"
+          description: "La espera en cola supera el plazo de la request (2 s): el motor no da abasto o hay clientes impacientes. Ver espera en cola y fsync. Estas órdenes NO se ejecutan."

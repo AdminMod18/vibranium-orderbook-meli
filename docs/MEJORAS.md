@@ -4,13 +4,29 @@ Documento vivo. El desafío evalúa sobre todo la **arquitectura** (escala, resi
 Cada ítem es una pregunta que un evaluador podría hacer, la respuesta de hoy y el siguiente paso.
 Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 
+## Estado de los hallazgos de la auditoría independiente
+| # | Hallazgo | Estado |
+|---|---|---|
+| R1 | `id`/`user_id` sin límite tumbaba el servicio | ✅ Corregido (D61) |
+| — | Una orden legítima que cruzaba ≈ 6.100 órdenes tumbaba el servicio | ✅ Corregido (D62, D63) |
+| R4 | `GET /book` O(L²) dentro del secuenciador | ✅ Corregido (D64); `/audit` y la copia del snapshot siguen siendo O(órdenes) (L17) |
+| R6 | Puertos y claves por defecto expuestos | ✅ Corregido (D66); la API sigue sin autenticación a propósito (L16) |
+| R10 | Scripts destructivos sin confirmación; tests contra la base viva; deriva documental | ✅ Corregido (D65) |
+| R2 | El proyector leía el journal antes del fsync y no detectaba que Postgres estuviera adelantado | ✅ **Corregido (D68)**; residual en L18 |
+| R3 | Sin candado de instancia única sobre el journal | ✅ **Corregido (D67)**; no es alta disponibilidad (L3) |
+| R5 | Cola de 50.000 con timeout de 2 s ⇒ órdenes que se ejecutaban tras un 504 (medido: 50 de 50) | ✅ **Corregido (D69):** se descartan sin ejecutar; cola por defecto 10.000; métrica y alerta `ExpiredCommands` |
+| R7 | Journal sin rotación, sin alerta de disco, sin réplica | ✅ **Alerta y métrica de disco (D70)** · ⏳ rotación del journal y réplica siguen en P2 (L13, L19) |
+| R8 | Interoperabilidad: los evaluadores deben fondear billeteras con `/deposits`; precios enteros en centavos | ✅ **Resuelto sin imponer nada:** `scripts/seed.sh` fondea de forma automática (opcional); quien prefiera lo manual usa `POST /deposits`. Los precios enteros en centavos siguen documentados en el README (D de contrato) |
+| R10 | Latencia extrema tras un reinicio y cola de p99 por pausas | ✅ **Corregido y mitigado (D72-D75):** reanudación del proyector por offset, −68 % de basura, snapshots espaciados. Pendiente de fondo: réplica de seguimiento para snapshots sin pausa (L21) y prueba de ≥ 30 min en disco real (L22). Detalle en [OPTIMIZACION.md](OPTIMIZACION.md) |
+| R9 | Rendimiento medido con fsync virtual, ≤ 100 s y generador co-ubicado | 🟡 **Parcial:** soak de 10 + 12 min con la ventana de 5 M llena (informe §2b: memoria, snapshots, crash real, reinicio de 11,8 s). Sigue pendiente ≥ 30 min en disco real y dimensionar memoria (L20) |
+
 ## Resiliencia
 
 | Pri | Pregunta del evaluador | Respuesta hoy | Siguiente paso |
 |---|---|---|---|
 | 🔴 | ¿Qué pasa si se cae el secuenciador? | Reinicio + replay del journal (ms). Probado con `kill -9`. Mientras reinicia hay indisponibilidad (no se pierde nada confirmado) | **Hot standby**: segunda instancia consumiendo el mismo log, promovida por *leader election* ⇒ RTO de segundos |
 | 🔴 | ¿Y si se pierde el disco? | Se pierde el journal (L6) | Volumen replicado (EBS multi-AZ / réplica síncrona) o mover el log a **Kafka/Redpanda** con replicación (`acks=all`) |
-| 🔴 | ¿Qué pasa si dos instancias arrancan a la vez? | Corrompen el journal (L7) | Lock de archivo (`flock`) como mínimo; en producción *lease* en etcd/Consul (fencing token) |
+| 🔴 | ¿Qué pasa si dos instancias arrancan a la vez? | **Se rechaza la segunda** (candado del SO, D67); si muere la primera el candado se libera solo | *Leader election* + réplica en espera para alta disponibilidad real |
 | 🟠 | ¿Qué pasa si Postgres cae? | **Probado** (`drill-postgres-down.sh`): el matching sigue, historial `503`, se reconcilia solo al volver | Alertar por *lag* del proyector (Fase 5) |
 | 🔴 | ¿Cuánto tarda en recuperarse? | **Hecho (Fase 6):** snapshot + cola ≈ 1 s; sin snapshot ≈ 7-9 s por millón de registros (medido) | Rotación de segmentos del journal y archivado de lo anterior al snapshot (L13) |
 | 🔴 | ¿Qué pasa tras días de operación? | **Idempotencia acotada** por ventana (D57: 5 M ids ≈ 409 MiB). Queda el journal: ≈150 GB/día a 5.000/s (L13) | **Rotación de segmentos** del journal y archivado de lo anterior al último snapshot |
@@ -50,7 +66,7 @@ Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 |---|---|---|
 | 🔴 | ¿Cómo sabes que funciona? | ✅ Métricas Prometheus + dashboard Grafana provisionado (ver `OBSERVABILIDAD.md`) |
 | 🔴 | ¿Cómo depuras una orden? | ✅ Logs JSON con `request_id`/`order_id`; `GET /orders/{id}` con historial |
-| 🟠 | ¿Qué alertas pondrías? | ✅ 10 reglas en Prometheus · ⏭ Alertmanager → Slack/PagerDuty |
+| 🟠 | ¿Qué alertas pondrías? | ✅ 13 reglas en Prometheus, **cada una con prueba unitaria (promtool)** · ⏭ Alertmanager → Slack/PagerDuty |
 | 🟠 | ¿Y las trazas? | ⏭ **OpenTelemetry**: span por request que atraviese cola → matching → fsync; *exemplars* para saltar de una métrica a su traza |
 | 🟠 | ¿SLOs? | ⏭ Definir SLO (p.ej. 99 % de órdenes < 100 ms) y alertar por *burn rate* |
 | 🟢 | ¿Métricas por instrumento? | ⏭ Etiqueta `instrument` al particionar el mercado (cardinalidad baja) |

@@ -1,0 +1,37 @@
+Soak: 12 min a 5000 órdenes/s. Salida en /tmp/tmp.wJkXheADqu
+min  ord/s   cola  503/s expir  heapMiB  rssMiB   gorut  gcMaxms jrnlMiB   ventana   snapAge   snapPausms snapWr_s  lag     libreGiB
+1    2005    127   0.0   0      901      1671     283    0.4     1390      3840990   41283     236       7.36      3935420 9.23    
+2    5004    119   0.0   0      675      1396     271    0.6     1499      4141206   145649    217       8.66      427909  9.11    
+3    7066    0     0.0   0      1042     2520     188    136.0   1657      4572138   183231    404       9.82      572675  8.76    
+4    5019    0     0.0   0      1965     2653     89     321.2   1767      4873331   90345     308       5.42      419749  8.35    
+5    5018    6     0.0   0      1028     1850     134    321.2   1878      5000000   197469    294       5.31      271830  7.94    
+6    5016    7     0.0   0      1489     2840     117    321.2   1989      5000000   104500    912       5.78      158886  7.61    
+7    5013    5     0.0   0      2277     2798     272    321.2   2101      5000000   212940    214       4.18      818     7.23    
+8    4950    13    0.0   0      1841     2385     60     321.2   2212      5000000   120618    286       4.43      340     6.93    
+9    5016    3     0.0   0      2278     2803     122    321.2   2323      5000000   27841     250       4.83      621     6.63    
+10   5014    20    0.0   0      1583     2830     136    356.7   2434      5000000   134698    537       8.24      903     6.33    
+11   5016    2     0.0   0      2739     3623     81     356.7   2545      5000000   242038    928       5.01      9718    6.05    
+12   4942    0     0.0   0      1861     3659     101    678.8   2656      5000000   149166    286       9.50      127     5.80    
+13   640     0     0.0   0      1820     3469     12     678.8   2670      5000000   187742    286       9.50      0       5.82    
+
+=== Resultado del generador (latencia medida por el cliente)
+órdenes completadas : 3600001 en 12m0.001s  =>  5000 órdenes/s efectivas
+AVISO: el generador descartó 1070095419 órdenes por no dar abasto (suba -workers o use otra máquina)
+latencia            : p50=3.723ms  p90=24.616746s  p99=30.876379s  p99.9=32.879292s  max=32.996878s
+respuestas          :  201×3600001
+cancelaciones       : 111846 (ya ejecutadas/no encontradas: 42206)
+auditoría de saldos : {"error":"","ok":true,"total_brl":400000000000000,"total_vib":400000000000}
+OK
+
+=== Extremos observados
+  cola máx: 127 | heap máx: 2739 MiB | RSS máx: 3659 MiB | goroutines máx: 283 | pausa GC máx: 678.8 ms
+  pausa del snapshot máx: 928 ms | escritura del snapshot máx: 9.82 s | lag del historial máx: 3935420
+  ventana de idempotencia máx: 5000000 ids | journal: 2670 MiB | libre mínimo en disco: 5.80 GiB
+  auditoría final: {"error":"","ok":true,"total_brl":400000000000000,"total_vib":400000000000}
+
+=== Reinicio con el estado ya grande
+- apagado ordenado (SIGTERM, deja snapshot final) y arranque:
+  desde_snapshot=true  registros_reproducidos=0  TIEMPO=11.769369264s
+  tamaño de archivos: journal.log=2670MiB snapshot.bin=268MiB 
+
+Muestras por minuto guardadas en /tmp/tmp.wJkXheADqu/muestras.csv

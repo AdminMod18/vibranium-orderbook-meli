@@ -100,7 +100,7 @@ func (w *statusWriter) WriteHeader(c int) { w.code = c; w.ResponseWriter.WriteHe
 func (a *API) observe(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-ID")
-		if id == "" {
+		if !domain.ValidID(id) { // vacío, demasiado largo o con caracteres raros: se genera uno propio
 			id = newID()
 		}
 		w.Header().Set("X-Request-ID", id)
@@ -132,7 +132,7 @@ func (a *API) observe(next http.Handler) http.Handler {
 // errorKind clasifica un error para métricas y logs (valores de etiqueta acotados).
 func errorKind(err error) string {
 	switch {
-	case errors.Is(err, engine.ErrInvalidOrder), errors.Is(err, wallet.ErrInvalidAmount):
+	case errors.Is(err, domain.ErrInvalidID), errors.Is(err, engine.ErrInvalidOrder), errors.Is(err, wallet.ErrInvalidAmount):
 		return "invalid"
 	case errors.Is(err, wallet.ErrInsufficientFunds):
 		return "insufficient_funds"
@@ -469,6 +469,8 @@ type errorBody struct {
 
 func writeDomainError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, domain.ErrInvalidID):
+		writeError(w, http.StatusBadRequest, "invalid_id", err.Error())
 	case errors.Is(err, engine.ErrInvalidOrder), errors.Is(err, wallet.ErrInvalidAmount):
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 	case errors.Is(err, wallet.ErrInsufficientFunds):

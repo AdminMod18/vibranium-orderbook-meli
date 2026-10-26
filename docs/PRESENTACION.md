@@ -6,7 +6,7 @@ Objetivo del evaluador: *"Para nosotros es más importante entender cómo llegas
 - [ ] **Agregar como colaboradores** del repositorio a `julianommartins` y `marcos-pinheiro-ml` (GitHub → repositorio → *Settings* → *Collaborators* → *Add people*). El repo debe ser **privado**.
 - [ ] Fusionar la rama `claude/focused-babbage-2ppmql` a `main` (o presentar desde esa rama, pero que se sepa cuál es).
 - [ ] En una carpeta nueva: `git clone` del repo → `./scripts/preflight.sh` → `docker compose up --build -d` → `./scripts/smoke.sh`. *(Esto prueba exactamente lo que probarán ellos.)*
-- [ ] `./scripts/verify-all.sh` en verde en TU máquina (los números del informe son de otra; aquí se confirman los tuyos).
+- [ ] `./scripts/verify-all.sh` en verde en TU máquina (te pedirá escribir `SI`: borra los volúmenes locales) (los números del informe son de otra; aquí se confirman los tuyos).
 - [ ] Docker Desktop abierto, internet disponible y puertos libres (`./scripts/preflight.sh` lo comprueba; si alguno está ocupado, `cp .env.example .env` y cambia ese número).
 - [ ] Antes de la demo: `docker compose down -v && docker compose up -d` (**libro vacío**; tras pruebas de carga el guion no cruza igual).
 - [ ] Abrir en pestañas: Grafana http://localhost:3000, Prometheus http://localhost:9090/alerts, el repo en GitHub.
@@ -54,9 +54,12 @@ Consejo: durante el paso de carga, **mira el dashboard** y cuenta qué se ve (ó
 | ¿Qué pasa si se cae la app? | Reinicio, snapshot + cola ≈ 1 s; sin snapshot ≈ 7 s por 800 k registros | `drill-docker-crash.sh` |
 | ¿Y si se cae Postgres? | El mercado sigue; historial 503; se reconcilia | `drill-postgres-down.sh` |
 | ¿Y si el disco falla? | Se pierde el journal: limitación conocida (L6). Producción: volumen replicado / réplica / Kafka | `DECISIONES.md` L6, `MEJORAS.md` |
-| ¿Y dos instancias a la vez? | Corromperían el journal: no hay candado (L7). Falta *leader election*/lock | `DECISIONES.md` L7 |
+| ¿Y dos instancias a la vez? | La segunda se **niega a arrancar** (candado del SO: `flock`/`LockFileEx`); si el dueño muere con `kill -9` el candado se libera solo. No es alta disponibilidad: no hay réplica | `drill-single-instance.sh`, D67 |
+| ¿Postgres puede quedar adelantado al journal? | No: el proyector solo lee lo ya sincronizado (fsync) y, si aun así detecta a Postgres por delante, **se detiene y avisa** en vez de saltarse órdenes | `DECISIONES.md` D68 |
 | ¿Cómo evitas el doble gasto? | Reserva de fondos al ingresar + secuenciador único | `smoke.sh` paso 3 |
 | ¿Y reintentos de bots? | `id` de orden = clave de idempotencia (409 si se repite) | `DECISIONES.md` D18 |
+| ¿Qué pasa si un cliente da timeout mientras su orden espera en cola? | El secuenciador **descarta sin ejecutar** lo que ya nadie espera (antes se ejecutaba: medido 50 de 50). Solo queda una ventana mínima si ya estaba en marcha; el reintento con el mismo id da 409 | `D69`, test `TestCommandsWhoseClientGaveUp…` |
+| ¿Qué pasa si se llena el disco? | Alerta `JournalDiskLow` (< 2 GiB) y `JournalDiskFillingUp` (< 6 h); si se llena, fail-stop. Rotación del journal: pendiente (L13) | `D70` |
 | ¿Qué pasa con días de operación? | La idempotencia está **acotada por una ventana** (5 M ids ≈ 409 MiB); el journal sí crece (≈150 GB/día a 5.000/s): hay que rotarlo (L13). Los snapshots ya lo permiten | `DECISIONES.md` D57, L13 |
 | ¿Y si un bot reintenta mucho después? | Pasada la ventana (≈17 min a 5.000/s) se acepta como nueva; si la orden sigue en el libro, se rechaza igual. Contrapartida estándar de toda API con claves de idempotencia | `drill-idempotency.sh` |
 | ¿Cómo sabes que funciona? | Tests con `-race`, smoke, drills, auditoría en vivo y `verify-all.sh` | `INFORME_PRUEBAS.md` |
@@ -66,6 +69,7 @@ Consejo: durante el paso de carga, **mira el dashboard** y cuenta qué se ve (ó
 ## Lo que NO hay que prometer
 - **No** decir que "escala infinito": se midió 16.000/s en un entorno compartido; el límite de diseño es un secuenciador por mercado.
 - **No** decir que hay alta disponibilidad: hay recuperación rápida, no réplica en espera.
+- **No** decir que la API es segura: no tiene autenticación (L16); los puertos de infraestructura están en `127.0.0.1` y sus claves son de demo.
 - **No** afirmar nada sobre la herramienta de monitoreo de Mercado Libre: se usó el estándar abierto de Prometheus y se puede preguntar.
 - Si algo no se probó en su máquina (Windows, Dockerfile completo), decirlo: ver *Limitaciones* en el informe.
 

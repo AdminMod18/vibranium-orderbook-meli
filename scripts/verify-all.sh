@@ -2,7 +2,8 @@
 # Verificación completa: tests + smoke + carga + drills de resiliencia, con una tabla PASS/FAIL al final.
 # Nada puede fallar en silencio: cada paso se ejecuta aislado y se informa su resultado y duración.
 #
-#   ./scripts/verify-all.sh            (~4 min; reinicia el stack desde cero: BORRA los datos locales)
+#   ./scripts/verify-all.sh            (~3 min; pide confirmación: reinicia el stack y BORRA los volúmenes locales)
+#   ASSUME_YES=1 ./scripts/verify-all.sh   (sin preguntar, p. ej. en CI)
 #   SKIP_GO=1 ./scripts/verify-all.sh  (sin los pasos que requieren Go instalado)
 #
 # Variables: COMPOSE_ARGS (p. ej. "-f docker-compose.yml -f override.yml"), API (por defecto localhost:8080).
@@ -28,20 +29,32 @@ reset_stack() { $COMPOSE down -v >/dev/null 2>&1; $COMPOSE up -d >/dev/null 2>&1
 
 command -v docker >/dev/null 2>&1 || { echo "Falta Docker. Ejecute ./scripts/preflight.sh"; exit 2; }
 
+# Este script REINICIA el stack con "down -v": borra los volúmenes (journal e historial). Se pide confirmación.
+if [ "${ASSUME_YES:-0}" != 1 ]; then
+  echo "ATENCIÓN: verify-all ejecuta 'docker compose down -v' (varias veces): BORRA los volúmenes del proyecto,"
+  echo "es decir el journal y el historial de Postgres de ESTE compose. No toca otros contenedores ni bases."
+  if [ ! -t 0 ]; then echo "Sin terminal interactiva: defina ASSUME_YES=1 para confirmar."; exit 2; fi
+  read -r -p "Escriba SI para continuar: " ans; [ "$ans" = SI ] || { echo "Cancelado."; exit 1; }
+fi
+export ASSUME_YES=1   # ya confirmado: los scripts hijos no vuelven a preguntar
+
 if [ $HAVE_GO = 1 ]; then
   TAIL=10 step "Tests unitarios y de concurrencia (go test -race)" bash -c 'go vet ./... && go test -race -count=1 ./...'
 else skip "Tests (go test)" "Go no instalado o SKIP_GO=1"; fi
 
+TAIL=3 step "Alertas: pruebas unitarias de las 13 reglas (promtool)" ./scripts/test-alerts.sh
 step "Levantar el stack desde cero" reset_stack
 TAIL=8 step "Smoke test end-to-end (22 comprobaciones)" ./scripts/smoke.sh
 TAIL=6 step "Carga: 5.000 órdenes/s durante 15 s + auditoría de saldos" $COMPOSE run --rm loadgen -rate 5000 -duration 15s -workers 128
 TAIL=4 step "Drill: crash real de la app (kill -9) y recuperación" ./scripts/drill-docker-crash.sh
+TAIL=5 step "Drill: 2º contenedor sobre el mismo volumen se rechaza" ./scripts/drill-single-instance.sh --docker
 step "Detener la app (para el drill de Postgres)" $COMPOSE stop orderbook
 TAIL=4 step "Drill: Postgres cae en pleno uso" ./scripts/drill-postgres-down.sh
 if [ $HAVE_GO = 1 ]; then
   TAIL=4 step "Drill: kill -9 en plena carga (servidor local)" ./scripts/drill-kill9.sh
   TAIL=4 step "Drill: sobrecarga y backpressure (503)" ./scripts/drill-overload.sh
   TAIL=6 step "Drill: idempotencia con ventana y cambio de ventana entre reinicios" ./scripts/drill-idempotency.sh
+  TAIL=6 step "Drill: una sola instancia por journal (candado)" ./scripts/drill-single-instance.sh
 else skip "Drills kill-9, sobrecarga e idempotencia" "requieren Go"; fi
 step "Dejar el stack limpio y operativo" reset_stack
 

@@ -59,7 +59,7 @@ func Apply(x *exchange.Exchange, rec Record) error {
 		return nil // solo identifica al journal; no cambia el estado
 
 	case KindDeposit:
-		return x.Deposit(rec.User, rec.BRL, rec.VIB)
+		return x.ReplayDeposit(rec.User, rec.BRL, rec.VIB)
 
 	case KindOrder:
 		side, err := parseSide(rec.Order.Side)

@@ -160,3 +160,54 @@ func TestMetricsReflectTrafficWithBoundedCardinality(t *testing.T) {
 		t.Error("el id de usuario no debe aparecer en las etiquetas")
 	}
 }
+
+// Regresión del defecto bloqueante de la auditoría: una sola petición con un id de 400 KB tumbaba TODO el
+// proceso (panic al escribir el journal). Ahora se rechaza con 400 y el servicio sigue funcionando.
+func TestHugeIdentifiersAreRejectedAndServiceKeepsWorking(t *testing.T) {
+	srv, _ := newServer(t, 100)
+	call(t, srv, "POST", "/deposits", `{"user_id":"alice","brl":1000000}`)
+	call(t, srv, "POST", "/deposits", `{"user_id":"bob","vib":100}`)
+	call(t, srv, "POST", "/orders", `{"id":"s1","user_id":"bob","side":"SELL","price":10,"qty":5}`)
+
+	huge := strings.Repeat("X", 400_000)
+	for name, body := range map[string]string{
+		"orden que cruza con id de 400 KB": fmt.Sprintf(`{"id":%q,"user_id":"alice","side":"BUY","price":10,"qty":5}`, huge),
+		"user_id de 400 KB":                fmt.Sprintf(`{"id":"x1","user_id":%q,"side":"BUY","price":10,"qty":1}`, huge),
+		"id con caracteres no permitidos":  `{"id":"a b/c","user_id":"alice","side":"BUY","price":10,"qty":1}`,
+	} {
+		code, resp := call(t, srv, "POST", "/orders", body)
+		if code != http.StatusBadRequest || resp["code"] != "invalid_id" {
+			t.Errorf("%s: esperaba 400 invalid_id, got %d %v", name, code, resp)
+		}
+	}
+	if code, _ := call(t, srv, "POST", "/deposits", fmt.Sprintf(`{"user_id":%q,"brl":1}`, huge)); code != http.StatusBadRequest {
+		t.Errorf("depósito con user_id enorme: got %d", code)
+	}
+	// el servicio sigue vivo y operando con normalidad
+	if code, body := call(t, srv, "POST", "/orders", `{"id":"b1","user_id":"alice","side":"BUY","price":10,"qty":5}`); code != 201 || len(body["trades"].([]any)) != 1 {
+		t.Fatalf("tras los rechazos el servicio debe seguir operando: %d %v", code, body)
+	}
+	if _, audit := call(t, srv, "GET", "/audit", ""); audit["ok"] != true {
+		t.Fatalf("auditoría: %v", audit)
+	}
+}
+
+func TestOversizedRequestIDHeaderIsReplaced(t *testing.T) {
+	srv, _ := newServer(t, 10)
+	req, _ := http.NewRequest("GET", srv.URL+"/healthz", nil)
+	req.Header.Set("X-Request-ID", strings.Repeat("Z", 5000))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("X-Request-ID"); len(got) == 0 || len(got) > 64 || strings.Contains(got, "Z") {
+		t.Fatalf("el X-Request-ID enorme debe sustituirse por uno propio: %q", got)
+	}
+	req.Header.Set("X-Request-ID", "mi-traza-123")
+	resp, _ = http.DefaultClient.Do(req)
+	resp.Body.Close()
+	if resp.Header.Get("X-Request-ID") != "mi-traza-123" {
+		t.Fatal("un X-Request-ID válido debe conservarse")
+	}
+}

@@ -1,0 +1,31 @@
+Soak: 8 min a 5000 órdenes/s. Salida en /tmp/tmp.TFjD11EsQx
+min  ord/s   cola  503/s expir  heapMiB  rssMiB   gorut  gcMaxms jrnlMiB   ventana   snapAge   snapPausms snapWr_s  lag     libreGiB
+1    4967    0     0.0   0      689      1426     168    1.1     1602      4498661   105260    183       3.86      412     8.37    
+2    5016    52    0.0   0      1428     1922     240    1.6     1712      4800160   213294    632       5.68      856     8.07    
+3    5032    0     0.0   0      1761     2042     151    867.8   1822      5000000   121163    241       4.62      259     7.78    
+4    4942    2     0.0   0      1979     2408     96     867.8   1933      5000000   28430     561       4.32      43      7.52    
+5    5013    0     0.0   0      1648     2196     73     867.8   2044      5000000   135960    234       6.10      69      7.22    
+6    5014    0     0.0   0      1272     2407     58     867.8   2155      5000000   43200     269       4.42      173     6.92    
+7    5014    0     0.0   0      1090     1911     66     867.8   2266      5000000   150616    286       4.97      230     6.63    
+8    4919    0     0.0   0      1624     2612     13     867.8   2375      5000000   50962     375       5.50      0       6.40    
+
+=== Resultado del generador (latencia medida por el cliente)
+órdenes completadas : 2400001 en 8m0.001s  =>  5000 órdenes/s efectivas
+latencia            : p50=2.193ms  p90=21.282ms  p99=533.374ms  p99.9=1.28395s  max=1.494282s
+respuestas          :  201×2400001
+cancelaciones       : 74983 (ya ejecutadas/no encontradas: 24069)
+auditoría de saldos : {"error":"","ok":true,"total_brl":200000600015000,"total_vib":200000006006}
+OK
+
+=== Extremos observados
+  cola máx: 52 | heap máx: 1979 MiB | RSS máx: 2612 MiB | goroutines máx: 240 | pausa GC máx: 867.8 ms
+  pausa del snapshot máx: 632 ms | escritura del snapshot máx: 6.10 s | lag del historial máx: 856
+  ventana de idempotencia máx: 5000000 ids | journal: 2375 MiB | libre mínimo en disco: 6.40 GiB
+  auditoría final: {"error":"","ok":true,"total_brl":200000600015000,"total_vib":200000006006}
+
+=== Reinicio con el estado ya grande
+- apagado ordenado (SIGTERM, deja snapshot final) y arranque:
+  desde_snapshot=true  registros_reproducidos=0  TIEMPO=9.0659102s
+  tamaño de archivos: journal.log=2375MiB snapshot.bin=247MiB 
+
+Muestras por minuto guardadas en /tmp/tmp.TFjD11EsQx/muestras.csv

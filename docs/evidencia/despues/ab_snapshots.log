@@ -1,0 +1,15 @@
+[A1_snapshots_cada_200k] órdenes completadas : 1200001 en 4m0.001s  =>  5000 órdenes/s efectivas
+[A1_snapshots_cada_200k] latencia            : p50=1.274ms  p90=3.405ms  p99=101.17ms  p99.9=349.546ms  max=512.847ms
+[A1_snapshots_cada_200k] snapshots tomados= última pausa=163 ms
+[B_sin_snapshots] órdenes completadas : 1200001 en 4m0.001s  =>  5000 órdenes/s efectivas
+[B_sin_snapshots] latencia            : p50=1.241ms  p90=2.938ms  p99=12.328ms  p99.9=244.532ms  max=333.318ms
+[B_sin_snapshots] snapshots tomados= última pausa=0 ms
+[A2_snapshots_cada_200k] órdenes completadas : 1199999 en 4m0.001s  =>  5000 órdenes/s efectivas
+[A2_snapshots_cada_200k] latencia            : p50=1.346ms  p90=5.401ms  p99=257.432ms  p99.9=503.927ms  max=552.793ms
+[A2_snapshots_cada_200k] snapshots tomados= última pausa=295 ms
+[C_snapshots_cada_1M] órdenes completadas : 1200001 en 4m0.001s  =>  5000 órdenes/s efectivas
+[C_snapshots_cada_1M] latencia            : p50=1.18ms  p90=2.873ms  p99=46.823ms  p99.9=274.664ms  max=441.034ms
+[C_snapshots_cada_1M] snapshots tomados= última pausa=435 ms
+[A3_snapshots_cada_200k] órdenes completadas : 1200001 en 4m0.223s  =>  4995 órdenes/s efectivas
+[A3_snapshots_cada_200k] latencia            : p50=1.217ms  p90=4.84ms  p99=341.745ms  p99.9=1.016914s  max=1.200117s
+[A3_snapshots_cada_200k] snapshots tomados= última pausa=799 ms

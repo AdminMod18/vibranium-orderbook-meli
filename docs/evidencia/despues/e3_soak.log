@@ -1,0 +1,31 @@
+Soak: 8 min a 5000 órdenes/s. Salida en /tmp/tmp.GedBShlxDc
+min  ord/s   cola  503/s expir  heapMiB  rssMiB   gorut  gcMaxms jrnlMiB   ventana   snapAge   snapPausms snapWr_s  lag     libreGiB
+1    4972    14    0.0   0      1420     1722     152    1.7     3029      5000000   105526    962       5.71      649     4.50    
+2    5023    4     0.0   0      1250     2070     221    1.7     3139      5000000   213265    589       6.72      566     4.10    
+3    5026    2     0.0   0      1452     1911     56     1.7     3249      5000000   120634    471       4.43      119     3.95    
+4    4931    29    0.0   0      1379     2011     175    1.7     3360      5000000   228250    1221      4.93      477     3.44    
+5    5018    0     0.0   0      1673     2038     151    1.7     3471      5000000   135838    1086      5.65      132     3.40    
+6    5018    0     0.0   0      1618     2194     128    2.2     3582      5000000   43030     664       6.30      85      3.10    
+7    5014    0     0.0   0      1191     2170     91     2.2     3693      5000000   150362    633       5.48      99      2.80    
+!! Queda menos de 3 GiB libres: se detiene la carga para no llenar el disco.
+
+=== Resultado del generador (latencia medida por el cliente)
+ Container vibranium-orderbook-meli-loadgen-run-526f0fcbd259 Creating 
+ Container vibranium-orderbook-meli-loadgen-run-526f0fcbd259 Created 
+Sembrando 100 usuarios... ok
+Carga: objetivo=5000 órd/s, 128 workers, 8m0s...
+
+
+=== Extremos observados
+  cola máx: 29 | heap máx: 1673 MiB | RSS máx: 2194 MiB | goroutines máx: 221 | pausa GC máx: 2.2 ms
+  pausa del snapshot máx: 1221 ms | escritura del snapshot máx: 6.72 s | lag del historial máx: 649
+  ventana de idempotencia máx: 5000000 ids | journal: 3693 MiB | libre mínimo en disco: 2.80 GiB
+  auditoría final: {"error":"","ok":true,"total_brl":800000600015000,"total_vib":800000006006}
+
+=== Reinicio con el estado ya grande
+- apagado ordenado (SIGTERM, deja snapshot final) y arranque:
+  desde_snapshot=true  registros_reproducidos=0  TIEMPO=16.942565639s
+  tamaño de archivos: journal.log=3694MiB snapshot.bin=338MiB 
+(la corrida se cortó antes de tiempo por falta de disco)
+
+Muestras por minuto guardadas en /tmp/tmp.GedBShlxDc/muestras.csv

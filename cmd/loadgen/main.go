@@ -81,7 +81,7 @@ func main() {
 	}
 	jobs := make(chan job, 20_000)
 	results := make([][]sample, *workers)
-	var cancels, cancelErr, dropped atomic.Int64
+	var cancels, cancelErr atomic.Int64
 	var wg sync.WaitGroup
 
 	for w := 0; w < *workers; w++ {
@@ -129,12 +129,10 @@ func main() {
 				time.Sleep(d)
 			}
 		}
-		select {
-		case jobs <- job{i: sent, at: at}:
-			sent++
-		default:
-			dropped.Add(1) // el propio generador no da abasto: se informa, no se oculta
-		}
+		// Envío bloqueante: si los workers no dan abasto el calendario se atrasa, pero ninguna orden se
+		// pierde y la latencia (medida desde `at`) lo refleja: eso es lo que evita la "omisión coordinada".
+		jobs <- job{i: sent, at: at}
+		sent++
 	}
 	close(jobs)
 	wg.Wait()
@@ -158,10 +156,10 @@ func main() {
 	}
 	fmt.Println("\n=== Resultado ===")
 	fmt.Printf("órdenes completadas : %d en %s  =>  %.0f órdenes/s efectivas\n", len(all), elapsed.Round(time.Millisecond), float64(len(all))/elapsed.Seconds())
-	if dropped.Load() > 0 {
-		fmt.Printf("AVISO: el generador descartó %d órdenes por no dar abasto (suba -workers o use otra máquina)\n", dropped.Load())
+	if late := elapsed - *duration; late > time.Second {
+		fmt.Printf("AVISO: el generador terminó %s después de lo previsto: el sistema no sostuvo el ritmo pedido\n", late.Round(time.Second))
 	}
-	fmt.Printf("latencia            : p50=%s  p90=%s  p99=%s  p99.9=%s  max=%s\n", pct(.5), pct(.9), pct(.99), pct(.999), pct(1))
+	fmt.Printf("latencia            : p50=%s  p90=%s  p95=%s  p99=%s  p99.9=%s  max=%s\n", pct(.5), pct(.9), pct(.95), pct(.99), pct(.999), pct(1))
 	var keys []int
 	for k := range codes {
 		keys = append(keys, k)

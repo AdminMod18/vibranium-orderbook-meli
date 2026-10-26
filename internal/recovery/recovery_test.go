@@ -104,7 +104,7 @@ func recoverAt(t *testing.T, jpath, spath string) (*exchange.Exchange, recovery.
 	if err != nil {
 		t.Fatalf("recuperación: %v", err)
 	}
-	t.Cleanup(func() { jr.Close() })
+	jr.Close() // solo interesa el estado recuperado; soltar el candado para poder reabrir el journal
 	return ex, rep
 }
 
@@ -312,6 +312,34 @@ func recoverWindow(t *testing.T, jpath, spath string, window int) (*exchange.Exc
 	if err != nil {
 		t.Fatalf("la recuperación con ventana %d falló: %v", window, err)
 	}
-	t.Cleanup(func() { jr.Close() })
+	jr.Close() // solo interesa el estado recuperado; soltar el candado para poder reabrir el journal
 	return ex, rep
+}
+
+// Una orden que ejecuta el tope de trades (y cuyo remanente se cancela) debe reproducirse IDÉNTICA desde el
+// journal: es el registro más grande que existe y el que antes hacía caer el servicio.
+func TestOrderTruncatedByTradeCapReplaysIdentically(t *testing.T) {
+	e := start(t, 0)
+	ctx := context.Background()
+	const makers = 12_000 // > engine.MaxTradesPerOrder
+	_ = e.seq.Deposit(ctx, "maker", 0, makers)
+	_ = e.seq.Deposit(ctx, "taker", 10*makers, 0)
+	for i := 0; i < makers; i++ {
+		if _, err := e.seq.PlaceOrder(ctx, domain.Order{ID: fmt.Sprintf("m%d", i), UserID: "maker", Side: domain.Sell, Price: 10, Qty: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := e.seq.PlaceOrder(ctx, domain.Order{ID: "big", UserID: "taker", Side: domain.Buy, Price: 10, Qty: makers})
+	if err != nil || res.Order.Status != domain.StatusCancelled || len(res.Trades) != 10_000 {
+		t.Fatalf("orden truncada: %v %+v trades=%d", err, res.Order, len(res.Trades))
+	}
+	e.seq.Stop()
+	want := normalized(e.ex)
+	e.jr.Close()
+
+	ex, rep := recoverAt(t, e.jpath, e.spath)
+	if rep.FromSnapshot {
+		t.Fatal("este caso debe ejercitar el replay completo")
+	}
+	mustEqual(t, want, ex, "orden truncada")
 }

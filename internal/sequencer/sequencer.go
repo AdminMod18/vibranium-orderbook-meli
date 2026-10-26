@@ -57,6 +57,7 @@ type Sequencer struct {
 
 	processed atomic.Uint64
 	rejected  atomic.Uint64 // rechazadas por cola llena
+	expired   atomic.Uint64 // descartadas sin ejecutar: su cliente ya no esperaba (plazo vencido o desconexión)
 	batches   atomic.Uint64
 }
 
@@ -212,6 +213,9 @@ func (s *Sequencer) Processed() uint64  { return s.processed.Load() }
 func (s *Sequencer) Overloaded() uint64 { return s.rejected.Load() }
 func (s *Sequencer) Batches() uint64    { return s.batches.Load() }
 
+// Expired cuenta los comandos descartados sin ejecutar porque su cliente ya no esperaba.
+func (s *Sequencer) Expired() uint64 { return s.expired.Load() }
+
 // JournalSeq es el último registro confirmado en el journal (0 si no hay persistencia).
 func (s *Sequencer) JournalSeq() uint64 {
 	if s.jr == nil {
@@ -223,7 +227,8 @@ func (s *Sequencer) JournalSeq() uint64 {
 // Do encola fn y espera su resultado. fn devuelve además el registro de journal a persistir
 // (nil si no cambia el estado). El encolado NO bloquea: con la cola llena devuelve
 // ErrOverloaded de inmediato (backpressure). Si ctx expira mientras se espera, el comando
-// igualmente se ejecutará (ya está en la cola): ver limitación L2.
+// NO se ejecutará si llega a la cabeza de la cola después de ese momento (se descarta y se cuenta en
+// Expired); solo puede ejecutarse si ya estaba en marcha cuando venció (L2).
 func Do[T any](ctx context.Context, s *Sequencer, fn func(*exchange.Exchange) (T, *journal.Record, error)) (T, error) {
 	var zero T
 	type reply struct {
@@ -235,6 +240,13 @@ func Do[T any](ctx context.Context, s *Sequencer, fn func(*exchange.Exchange) (T
 	cmd := func(x *exchange.Exchange) (*journal.Record, func()) {
 		if s.obs != nil {
 			s.obs.QueueWait(time.Since(enqueued))
+		}
+		// Si el cliente ya no espera (venció su plazo o se desconectó) NO se ejecuta: su respuesta fue un
+		// error/504, así que ejecutar la orden ahora crearía una "ejecución fantasma" que él no conoce.
+		// Medido antes de esta guarda: 50 de 50 órdenes cuyo cliente recibió timeout se ejecutaron igual.
+		if err := ctx.Err(); err != nil {
+			s.expired.Add(1)
+			return nil, func() { ch <- reply{zero, err} }
 		}
 		v, rec, err := fn(x)
 		if err != nil {

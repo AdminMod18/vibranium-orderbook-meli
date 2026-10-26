@@ -11,6 +11,8 @@ import (
 	"container/heap"
 	"container/list"
 	"errors"
+	"fmt"
+	"sort"
 
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/domain"
 )
@@ -19,6 +21,12 @@ import (
 const (
 	MaxPrice domain.Price = 1_000_000_000
 	MaxQty   domain.Qty   = 1_000_000_000
+
+	// MaxTradesPerOrder acota el trabajo de UN comando: el secuenciador es un solo hilo y cada orden se
+	// registra en el journal como UN registro con todos sus trades. Una orden que cruzaría más órdenes
+	// se ejecuta hasta este tope y su remanente se CANCELA (no se deja en el libro, para no dejarlo
+	// cruzado). Con ids de hasta 64 caracteres, 10.000 trades ocupan ≈ 5 MB: ver journal.maxRecordSize.
+	MaxTradesPerOrder = 10_000
 )
 
 var (
@@ -139,6 +147,15 @@ type Result struct {
 	Trades []domain.Trade
 }
 
+// ValidateIdentifiers comprueba el id de la orden y del usuario. Solo se aplica a órdenes NUEVAS: el
+// journal contiene lo que ya se aceptó y al reproducirlo no se vuelve a juzgar el formato.
+func ValidateIdentifiers(o domain.Order) error {
+	if !domain.ValidID(o.ID) || !domain.ValidID(o.UserID) {
+		return fmt.Errorf("%w (id=%d bytes, user_id=%d bytes)", domain.ErrInvalidID, len(o.ID), len(o.UserID))
+	}
+	return nil
+}
+
 // Validate comprueba una orden sin tocar el libro (el exchange la usa antes de reservar fondos).
 func Validate(o domain.Order) error {
 	switch {
@@ -170,11 +187,15 @@ func (b *Book) Submit(in domain.Order) (Result, error) {
 	o.Filled = 0
 	o.Status = domain.StatusOpen
 
-	trades := b.match(&o)
+	trades, truncated := b.match(&o)
 
 	switch {
 	case o.Remaining() == 0:
 		o.Status = domain.StatusFilled
+	case truncated:
+		// Se alcanzó MaxTradesPerOrder con precios aún compatibles: el remanente no puede quedar en el
+		// libro (lo dejaría cruzado). Se cancela; la capa superior libera su reserva.
+		o.Status = domain.StatusCancelled
 	default:
 		if o.Filled > 0 {
 			o.Status = domain.StatusPartiallyFilled
@@ -196,14 +217,17 @@ func crosses(taker *domain.Order, makerPrice domain.Price) bool {
 }
 
 // match ejecuta el cruce de la orden entrante (taker) contra el libro (makers).
-func (b *Book) match(taker *domain.Order) []domain.Trade {
-	var trades []domain.Trade
+// Devuelve además si se detuvo por MaxTradesPerOrder aún habiendo precios compatibles.
+func (b *Book) match(taker *domain.Order) (trades []domain.Trade, truncated bool) {
 	opposite := b.half(taker.Side.Opposite())
 
 	for taker.Remaining() > 0 {
 		best := opposite.best()
 		if best == nil || !crosses(taker, best.price) {
 			break
+		}
+		if len(trades) >= MaxTradesPerOrder {
+			return trades, true
 		}
 
 		front := best.orders.Front()
@@ -239,7 +263,7 @@ func (b *Book) match(taker *domain.Order) []domain.Trade {
 			maker.Status = domain.StatusPartiallyFilled
 		}
 	}
-	return trades
+	return trades, false
 }
 
 // Cancel retira una orden del libro. Devuelve su estado final.
@@ -266,12 +290,9 @@ func (b *Book) Depth(side domain.Side, n int) []Level {
 	h := b.half(side)
 	levels := make([]*level, len(h.heap.levels))
 	copy(levels, h.heap.levels)
-	// ordenamiento simple por mejor precio (n de niveles es chico en consulta)
-	for i := 1; i < len(levels); i++ {
-		for j := i; j > 0 && h.heap.better(levels[j].price, levels[j-1].price); j-- {
-			levels[j], levels[j-1] = levels[j-1], levels[j]
-		}
-	}
+	// O(L log L). Corre DENTRO del secuenciador: con un ordenamiento O(L²), 50.000 niveles de precio
+	// bloqueaban el motor ~0,8 s por cada GET /book (medido en la auditoría).
+	sort.Slice(levels, func(i, j int) bool { return h.heap.better(levels[i].price, levels[j].price) })
 	if n > len(levels) {
 		n = len(levels)
 	}

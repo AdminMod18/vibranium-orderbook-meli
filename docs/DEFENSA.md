@@ -134,6 +134,8 @@ Ninguna orden aceptada se pierde por un deploy.
 | Falla `write`/`fsync` (disco lleno/dañado) | No se puede garantizar durabilidad | `panic` (fail-stop): mejor caído que mentir; se reinicia desde lo durable |
 | Corrupción real del journal | Estado dudoso | El servidor se niega a arrancar y avisa; requiere intervención humana |
 | Se pierde el disco | Se pierde el log | **Limitación L6**: en producción, volumen replicado/standby (ver `MEJORAS.md`) |
+| Se arranca una 2ª instancia sobre el mismo journal | Lo corrompería (dos escritores) | **Se rechaza**: candado del SO (`flock`/`LockFileEx`) tomado antes de leer; se libera solo si el dueño muere (`drill-single-instance.sh`). No es alta disponibilidad |
+| El journal retrocede (copia antigua, cola perdida) con Postgres ya adelantado | El historial mostraría órdenes inexistentes y saltaría las nuevas | El proyector **solo lee lo sincronizado** y, si ve a Postgres por delante, **se detiene y avisa** (D68); el mercado sigue |
 | La API cae pero el secuenciador no | Sin entrada de requests | Réplicas stateless detrás de un balanceador |
 
 ### Números para citar
@@ -246,11 +248,11 @@ Cola de 8 posiciones y 512 clientes a máxima velocidad (≈32.000 req/s de pres
 - **Coste honesto:** el snapshot tiene una pausa breve del secuenciador al copiar el estado (ver L14); lo que lo hacía crecer, el conjunto de ids, ahora está acotado por la ventana de idempotencia (D57).
 
 ### Preguntas probables
-- *¿Y si el reinicio tarda mucho?* Snapshots cada 200.000 registros + uno final al apagar: ~1 s. Sin snapshot, ~7-9 s por millón de registros.
+- *¿Y si el reinicio tarda mucho?* Snapshot cada 1.000.000 de registros (configurable) + uno final al apagar: un reinicio normal no reproduce nada y tras un crash la cola es de ≤ ~9 s. Sin snapshot, ~7-9 s por millón de registros. Se espaciaron (antes cada 200.000) porque cada snapshot frena al secuenciador y dominaba el p99: ver OPTIMIZACION.md.
 - *¿Qué pasa si el snapshot está corrupto?* Se ignora y se reproduce el journal: el snapshot nunca es la verdad.
 - *¿Cuánto escala?* 16.000 órdenes/s medidas (3,2× el objetivo) en una máquina de 4 núcleos compartida; el matching usa el 2,3 % del CPU. Más allá: particionar por instrumento y separar API/secuenciador.
 - *¿Qué pasa con días de operación?* La memoria de idempotencia está **acotada** por una ventana (5 M ids ≈ 409 MiB; configurable). Queda el crecimiento del journal (≈150 GB/día a 5.000/s): los snapshots ya permiten truncar lo anterior, falta implementar la rotación por segmentos (L13).
-- *¿Cómo sabes que funciona?* `./scripts/verify-all.sh`: tests con race detector, smoke de 22 comprobaciones, carga a 5.000/s y 4 drills, con tabla PASS/FAIL.
+- *¿Cómo sabes que funciona?* `./scripts/verify-all.sh`: tests con race detector, smoke de 22 comprobaciones, carga a 5.000/s y 6 drills, con tabla PASS/FAIL.
 
 ### Idempotencia con ventana (`internal/exchange/idwindow.go`)
 - **Qué hace:** recuerda los últimos N ids aceptados (5 M por defecto, `IDEMPOTENCY_WINDOW`). Reintento reciente ⇒ 409. Más antiguo que la ventana ⇒ se trata como orden nueva. Si la orden **sigue en el libro**, se rechaza igual.
@@ -258,6 +260,19 @@ Cola de 8 posiciones y 512 clientes a máxima velocidad (≈32.000 req/s de pres
 - **Costos medidos:** ≈85-97 bytes por id; 5 M ids = 409 MiB; copiarlos para un snapshot = 19 ms.
 - **Detalle sutil:** al reproducir el journal NO se comprueba la ventana (el journal solo contiene lo aceptado). Así cambiar el tamaño de la ventana entre reinicios nunca impide arrancar; una mutación de prueba lo demostró.
 - **Pregunta probable:** *"¿y si un bot reintenta tras la ventana?"* Se aceptaría como orden nueva (contrapartida estándar); a 5.000/s la ventana cubre ≈17 min, y un reintento real ocurre en segundos. Si el negocio exigiera más, se sube la ventana (memoria lineal) o se pasa a un almacén externo con TTL.
+
+### Resistencia (soak) con la ventana llena — lo que mostró (INFORME §2b)
+- **Qué se hizo:** 10 + 12 min a 5.000 órd/s hasta 7,5 M registros (journal 2,7 GiB) con la ventana de idempotencia en su tope de 5 M ids. Saldos auditados `ok`; el historial en Postgres coincide con el motor.
+- **Un crash real, no planeado:** el entorno se reinició a mitad de la corrida 1; la app volvió sola (snapshot + 118.183 registros, 17 s en frío) y los saldos cuadraban. Es la mejor evidencia de "qué pasa si cae".
+- **Reinicio ordenado con estado grande:** 11,8 s (snapshot de 268 MiB). Sube con el tamaño del estado: con más de ~10 M órdenes vivas habría que sacar las lecturas del secuenciador y comprimir el snapshot (L17).
+- **Lo que hay que reconocer:** en este sandbox compartido, con el estado lleno, el sistema quedó al borde de 5.000/s (p50 3,7 ms, pero p90 24 s por un atraso inicial que no se drenó), con pausas de GC/snapshot de 0,3-0,9 s y RSS de 3,7 GiB. No se oculta: se dimensiona la memoria (≥ 4 GiB, `GOMEMLIMIT`, L20) y se repite en disco real.
+- **Pregunta probable:** *"¿aguanta 5.000/s sostenido?"* → Sí, 10 min limpios (cola ≤ 5) con el estado creciendo; con 5 M ids + millones de órdenes en memoria queda justo en una máquina de 4 núcleos compartida. Lo siguiente sería sacar `GET /book` y `/audit` del hilo único y fijar límites de memoria.
+
+### Optimización guiada por evidencia (OPTIMIZACION.md)
+- **Historia para contar:** el soak mostró p90 = 24,6 s. En vez de «optimizar», se midió: era un solo minuto tras el reinicio en el que el proyector del historial **releía todo el journal** (≈ 60 s con 7,5 M registros). Se reprodujo (58 errores 504), se corrigió (reanuda por offset y verifica 1 registro) y se repitió: 0 errores, p99 de 2,45 s a 0,58 s.
+- **Qué quedó como causa de la cola de latencia en régimen estable:** la pausa del snapshot (copia del estado): p99 = 12 ms sin snapshots vs 101-342 ms cada 200.000 registros. Se espació (cada 1 M: 47 ms) a cambio de ≤ ~9 s más de reproducción tras un *crash*.
+- **Lo que se descartó midiendo:** fsync (0,4 ms), matching (0,03 ms por lote), ventana de idempotencia (42-79 B por orden), CPU *steal* del entorno (1,5-2 %).
+- **Preguntas probables:** *«¿por qué RSS 3,7 GiB con 0,7 vivos?»* → RSS ≈ heap_sys − devuelto + ~40 MiB; el heap llega a ~2× lo vivo con `GOGC=100` y los snapshots sumaban ≈ 1 GiB de basura (ahora ≈ 46 MiB). *«¿Sostiene 5.000/s?»* → sí en lo medido (hasta 14 min, sin errores); no se demostró ≥ 30 min ni disco real.
 
 ## Estado
 Todas las fases completas. Pendiente solo lo operativo: añadir a los evaluadores como colaboradores del repositorio (ver PRESENTACION.md).

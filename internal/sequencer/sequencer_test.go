@@ -165,7 +165,8 @@ func TestCrashRecoveryRebuildsIdenticalState(t *testing.T) {
 		}(g)
 	}
 	wg.Wait()
-	s.Stop() // detiene la goroutine, pero NO se cierra el journal: equivale a un kill -9
+	s.Stop()
+	j.Abandon() // suelta archivo y candado SIN sincronizar ni cerrar con orden: equivale a un kill -9
 	if j.Syncs() == 0 || s.Batches() == 0 {
 		t.Fatal("debe haber habido fsyncs")
 	}
@@ -187,5 +188,64 @@ func TestCrashRecoveryRebuildsIdenticalState(t *testing.T) {
 	}
 	if got := takeStateView(ex2); !reflect.DeepEqual(want, got) {
 		t.Fatal("el estado recuperado difiere del estado previo a la caída")
+	}
+}
+
+// R5: un comando cuyo cliente ya se rindió (timeout/desconexión) NO debe ejecutarse al llegar a la cabeza
+// de la cola. Antes de la guarda, las 50 órdenes cuyo cliente recibió 504 se ejecutaban igual ("fantasmas").
+func TestCommandsWhoseClientGaveUpAreShedNotExecuted(t *testing.T) {
+	ex := exchange.New()
+	s := New(ex, 1000)
+	defer s.Stop()
+	ctx := context.Background()
+	if err := s.Deposit(ctx, "alice", 1_000_000, 0); err != nil {
+		t.Fatal(err)
+	}
+	// ocupa el secuenciador
+	release, started := make(chan struct{}), make(chan struct{})
+	go Do(ctx, s, func(*exchange.Exchange) (int, *journal.Record, error) { close(started); <-release; return 0, nil, nil })
+	<-started
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	gaveUp := 0
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			c, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
+			defer cancel()
+			_, err := s.PlaceOrder(c, domain.Order{ID: fmt.Sprintf("ghost%d", i), UserID: "alice", Side: domain.Buy, Price: 10, Qty: 1})
+			if errors.Is(err, context.DeadlineExceeded) {
+				mu.Lock()
+				gaveUp++
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait() // los 50 clientes se rindieron
+	patient := make(chan error, 1)
+	go func() { // un cliente paciente encolado DETRÁS de los que se rindieron
+		_, err := s.PlaceOrder(ctx, domain.Order{ID: "patient", UserID: "alice", Side: domain.Buy, Price: 10, Qty: 1})
+		patient <- err
+	}()
+	time.Sleep(30 * time.Millisecond) // asegura que quedó encolado
+	close(release)
+	if err := <-patient; err != nil {
+		t.Fatalf("el cliente que sí esperaba debe ser atendido: %v", err)
+	}
+
+	if gaveUp != 50 {
+		t.Fatalf("los 50 clientes debían rendirse: %d", gaveUp)
+	}
+	executed, err := Do(ctx, s, func(x *exchange.Exchange) (int64, *journal.Record, error) { return x.SeenCount(), nil, nil })
+	if err != nil || executed != 1 {
+		t.Fatalf("solo la orden del cliente paciente debe haberse ejecutado, no las 50 fantasmas: ejecutadas=%d err=%v", executed, err)
+	}
+	if bal, _ := s.Balance(ctx, "alice"); bal.BRLHeld != 10 {
+		t.Fatalf("solo debe haber UNA reserva (10): %+v", bal)
+	}
+	if s.Expired() != 50 {
+		t.Fatalf("debía contar 50 comandos descartados: %d", s.Expired())
 	}
 }

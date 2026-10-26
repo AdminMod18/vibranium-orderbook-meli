@@ -1,0 +1,33 @@
+Soak: 10 min a 5000 órdenes/s. Salida en /tmp/tmp.HgDYrYZ7tv
+min  ord/s   cola  503/s expir  heapMiB  rssMiB   gorut  gcMaxms jrnlMiB   ventana   snapAge   snapPausms snapWr_s  lag     libreGiB
+1    4860    1     0.0   0      49       106      98     4.1     107       296968    103689    12        0.11      133     4.33    
+2    5016    16    0.0   0      106      196      83     4.8     217       597977    11525     28        0.40      464     3.71    
+3    5014    10    0.0   0      123      267      116    4.8     327       898856    119292    176       0.58      537     3.08    
+4    5016    2     0.0   0      216      368      60     4.8     437       1199768   26897     57        0.70      260     2.79    
+5    5017    0     0.0   0      303      396      70     4.8     548       1500658   134541    123       1.44      314     2.50    
+6    5012    4     0.0   0      402      575      233    4.8     659       1801826   42522     136       1.58      661     2.19    
+7    4944    0     0.0   0      465      590      86     4.8     771       2103238   150673    98        1.05      260     1.91    
+8    5019    10    0.0   0      495      714      55     4.8     882       2404196   58082     199       2.18      86      1.61    
+9    5021    2     0.0   0      405      742      104    4.8     993       2705580   166103    349       1.73      193     1.31    
+10   4918    0     0.0   0      618      839      13     4.8     1101      3000001   66949     154       2.25      0       1.09    
+
+=== Resultado del generador (latencia medida por el cliente)
+órdenes completadas : 3000001 en 10m0.001s  =>  5000 órdenes/s efectivas
+latencia            : p50=1.78ms  p90=6.937ms  p99=202.013ms  p99.9=686.953ms  max=886.944ms
+respuestas          :  201×3000001
+cancelaciones       : 93317 (ya ejecutadas/no encontradas: 26436)
+auditoría de saldos : {"error":"","ok":true,"total_brl":100000000000000,"total_vib":100000000000}
+OK
+
+=== Extremos observados
+  cola máx: 16 | heap máx: 618 MiB | RSS máx: 839 MiB | goroutines máx: 233 | pausa GC máx: 4.8 ms
+  pausa del snapshot máx: 349 ms | escritura del snapshot máx: 2.25 s | lag del historial máx: 661
+  ventana de idempotencia máx: 3000001 ids | journal: 1101 MiB | libre mínimo en disco: 1.09 GiB
+  auditoría final: {"error":"","ok":true,"total_brl":100000000000000,"total_vib":100000000000}
+
+=== Reinicio con el estado ya grande
+- apagado ordenado (SIGTERM, deja snapshot final) y arranque:
+  desde_snapshot=true  registros_reproducidos=0  TIEMPO=5.864230895s
+  tamaño de archivos: journal.log=1101MiB snapshot.bin=134MiB 
+
+Muestras por minuto guardadas en /tmp/tmp.HgDYrYZ7tv/muestras.csv

@@ -46,7 +46,16 @@ func (x *Exchange) SeenCount() int64    { return x.seen.size.Load() }
 func (x *Exchange) SeenEvicted() uint64 { return x.seen.evicted.Load() }
 func (x *Exchange) SeenLimit() int      { return x.seen.limit }
 
+// Deposit acredita saldo a un usuario (ruta en vivo: valida el identificador).
 func (x *Exchange) Deposit(user string, brl, vib int64) error {
+	if !domain.ValidID(user) {
+		return fmt.Errorf("%w (user_id=%d bytes)", domain.ErrInvalidID, len(user))
+	}
+	return x.ReplayDeposit(user, brl, vib)
+}
+
+// ReplayDeposit reaplica un depósito ya aceptado leído del journal: no vuelve a juzgar el formato del id.
+func (x *Exchange) ReplayDeposit(user string, brl, vib int64) error {
 	if err := x.ledger.Deposit(user, brl, vib); err != nil {
 		return err
 	}
@@ -72,6 +81,11 @@ func (x *Exchange) ReplayOrder(o domain.Order) (engine.Result, error) { return x
 func (x *Exchange) placeOrder(o domain.Order, checkDup bool) (engine.Result, error) {
 	if err := engine.Validate(o); err != nil {
 		return engine.Result{}, err
+	}
+	if checkDup { // solo órdenes NUEVAS: el journal contiene lo ya aceptado
+		if err := engine.ValidateIdentifiers(o); err != nil {
+			return engine.Result{}, err
+		}
 	}
 	if checkDup && x.seen.has(o.ID) {
 		return engine.Result{}, ErrDuplicateOrder
@@ -102,6 +116,12 @@ func (x *Exchange) placeOrder(o domain.Order, checkDup bool) (engine.Result, err
 		if err := x.ledger.Settle(t, buyLimit); err != nil {
 			// Violación de invariante: es un bug, no un error de usuario. Se detiene todo.
 			panic(fmt.Sprintf("liquidación inconsistente en trade %d: %v", t.ID, err))
+		}
+	}
+	// Orden truncada por MaxTradesPerOrder: su remanente no quedó en el libro, se devuelve lo reservado.
+	if res.Order.Status == domain.StatusCancelled {
+		if err := x.ledger.Release(res.Order); err != nil {
+			panic(fmt.Sprintf("liberación inconsistente en orden truncada %s: %v", o.ID, err))
 		}
 	}
 	return res, nil

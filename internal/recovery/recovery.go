@@ -6,6 +6,7 @@
 package recovery
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -33,7 +34,10 @@ func Recover(journalPath, snapPath string, opts journal.Options, window int, log
 	var rep Report
 
 	if snapPath != "" {
-		ex, jr, r, reason := tryWithSnapshot(journalPath, snapPath, opts, window)
+		ex, jr, r, reason, fatal := tryWithSnapshot(journalPath, snapPath, opts, window)
+		if fatal != nil { // otra instancia usa el journal: no tiene sentido probar la ruta lenta
+			return nil, nil, rep, fatal
+		}
 		if reason == "" {
 			r.Took = time.Since(t0)
 			return ex, jr, r, nil
@@ -59,31 +63,34 @@ func Recover(journalPath, snapPath string, opts journal.Options, window int, log
 
 // tryWithSnapshot intenta la ruta rápida. Si devuelve reason != "", la ruta rápida NO se usó
 // (y no deja nada abierto ni modificado).
-func tryWithSnapshot(journalPath, snapPath string, opts journal.Options, window int) (*exchange.Exchange, *journal.Journal, Report, string) {
+func tryWithSnapshot(journalPath, snapPath string, opts journal.Options, window int) (*exchange.Exchange, *journal.Journal, Report, string, error) {
 	snap, err := snapshot.Read(snapPath)
 	if err != nil {
-		return nil, nil, Report{}, err.Error()
+		return nil, nil, Report{}, err.Error(), nil
 	}
 	id, err := journal.ReadID(journalPath)
 	if err != nil {
-		return nil, nil, Report{}, "no se pudo leer la identidad del journal: " + err.Error()
+		return nil, nil, Report{}, "no se pudo leer la identidad del journal: " + err.Error(), nil
 	}
 	if id == "" || id != snap.JournalID {
-		return nil, nil, Report{}, "el snapshot pertenece a otro journal"
+		return nil, nil, Report{}, "el snapshot pertenece a otro journal", nil
 	}
 	ex, err := exchange.Restore(snap.State, window)
 	if err != nil {
-		return nil, nil, Report{}, "estado del snapshot inválido: " + err.Error()
+		return nil, nil, Report{}, "estado del snapshot inválido: " + err.Error(), nil
 	}
 	jr, stats, err := journal.RecoverFrom(journalPath, opts, &journal.Resume{Offset: snap.JournalOffset, LastSeq: snap.LastSeq},
 		func(r journal.Record) error { return journal.Apply(ex, r) })
 	if err != nil {
-		return nil, nil, Report{}, "la cola del journal no encaja con el snapshot: " + err.Error()
+		if errors.Is(err, journal.ErrLocked) {
+			return nil, nil, Report{}, "", err
+		}
+		return nil, nil, Report{}, "la cola del journal no encaja con el snapshot: " + err.Error(), nil
 	}
 	if err := ex.CheckInvariants(); err != nil {
 		jr.Close()
-		return nil, nil, Report{}, "invariantes rotos con el snapshot: " + err.Error()
+		return nil, nil, Report{}, "invariantes rotos con el snapshot: " + err.Error(), nil
 	}
 	return ex, jr, Report{FromSnapshot: true, SnapshotSeq: snap.LastSeq, Replayed: stats.Records,
-		LastSeq: stats.LastSeq, TruncatedBytes: stats.TruncatedBytes}, ""
+		LastSeq: stats.LastSeq, TruncatedBytes: stats.TruncatedBytes}, "", nil
 }

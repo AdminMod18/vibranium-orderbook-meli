@@ -1,0 +1,34 @@
+Soak: 17 min a 5000 órdenes/s. Salida en /tmp/tmp.qhn6Q461hO
+min  ord/s   cola  503/s expir  heapMiB  rssMiB   gorut  gcMaxms jrnlMiB   ventana   snapAge   snapPausms snapWr_s  lag     libreGiB
+1    4939    0     0.0   0      73       119      79     111.9   107       296877    302530    0         0.00      42      4.43    
+2    5015    1     0.0   0      111      187      238    111.9   217       597748    610272    0         0.00      1355    3.82    
+3    5016    4     0.0   0      128      243      60     111.9   326       898687    918260    0         0.00      121     3.23    
+4    5014    0     0.0   0      284      343      69     111.9   437       1199569   226078    204       0.84      218     2.91    
+5    5014    0     0.0   0      336      392      104    111.9   548       1500452   533915    204       0.84      207     2.63    
+6    4932    4     0.0   0      351      447      121    111.9   659       1801345   841734    204       0.84      111     2.35    
+7    5014    0     0.0   0      465      616      46     111.9   770       2102127   149266    283       1.33      271     2.01    
+8    5015    9     0.0   0      573      653      73     111.9   881       2403167   457419    283       1.33      536     1.73    
+9    5016    1     0.0   0      551      698      45     111.9   992       2704050   765033    283       1.33      176     1.46    
+10   5017    0     0.0   0      714      923      162    111.9   1103      3005576   73341     681       2.16      284     1.13    
+!! Queda menos de 1.2 GiB libres: se detiene la carga para no llenar el disco.
+
+=== Resultado del generador (latencia medida por el cliente)
+ Container vibranium-verify-loadgen-run-453098ea8655 Creating 
+ Container vibranium-verify-loadgen-run-453098ea8655 Created 
+Sembrando 100 usuarios... ok
+Carga: objetivo=5000 órd/s, 128 workers, 17m0s...
+
+
+=== Extremos observados
+  cola máx: 9 | heap máx: 714 MiB | RSS máx: 923 MiB | goroutines máx: 238 | pausa GC máx: 111.9 ms
+  pausa del snapshot máx: 681 ms | escritura del snapshot máx: 2.16 s | lag del historial máx: 1355
+  ventana de idempotencia máx: 3005576 ids | journal: 1103 MiB | libre mínimo en disco: 1.13 GiB
+  auditoría final: {"error":"","ok":true,"total_brl":100000000000000,"total_vib":100000000000}
+
+=== Reinicio con el estado ya grande
+- apagado ordenado (SIGTERM, deja snapshot final) y arranque:
+  desde_snapshot=true  registros_reproducidos=0  TIEMPO=5.093787848s
+  tamaño de archivos: journal.log=1104MiB snapshot.bin=134MiB 
+(la corrida se cortó antes de tiempo por falta de disco)
+
+Muestras por minuto guardadas en /tmp/tmp.qhn6Q461hO/muestras.csv
