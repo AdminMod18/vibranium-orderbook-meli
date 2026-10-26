@@ -108,14 +108,14 @@ func TestStopDrainsQueueAndRejectsNew(t *testing.T) {
 	}
 }
 
-type snapshot struct {
+type stateView struct {
 	accounts map[string]wallet.Account
 	bids     []engine.Level
 	asks     []engine.Level
 }
 
-func takeSnapshot(x *exchange.Exchange) snapshot {
-	s := snapshot{accounts: map[string]wallet.Account{}}
+func takeStateView(x *exchange.Exchange) stateView {
+	s := stateView{accounts: map[string]wallet.Account{}}
 	for _, u := range x.Ledger().Users() {
 		if a := x.Ledger().Get(u); a != (wallet.Account{}) {
 			s.accounts[u] = a
@@ -171,7 +171,7 @@ func TestCrashRecoveryRebuildsIdenticalState(t *testing.T) {
 	}
 	t.Logf("comandos=%d lotes(fsync)=%d -> group commit confirma ~%d comandos por fsync",
 		s.Processed(), j.Syncs(), s.Processed()/j.Syncs())
-	want := takeSnapshot(ex)
+	want := takeStateView(ex)
 
 	// --- reinicio ---
 	ex2 := exchange.New()
@@ -185,7 +185,7 @@ func TestCrashRecoveryRebuildsIdenticalState(t *testing.T) {
 	if err := ex2.CheckInvariants(); err != nil {
 		t.Fatalf("invariantes tras recuperar: %v", err)
 	}
-	if got := takeSnapshot(ex2); !reflect.DeepEqual(want, got) {
+	if got := takeStateView(ex2); !reflect.DeepEqual(want, got) {
 		t.Fatal("el estado recuperado difiere del estado previo a la caída")
 	}
 }

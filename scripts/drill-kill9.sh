@@ -4,11 +4,20 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-WORK=$(mktemp -d); trap 'kill "$(cat "$WORK/pid" 2>/dev/null)" 2>/dev/null || true; rm -rf "$WORK"' EXIT
+WORK=$(mktemp -d)
+cleanup() { # espera a que el servidor termine (escribe su snapshot final) ANTES de borrar; conserva el código de salida real
+  local rc=$? pid; pid=$(cat "$WORK/pid" 2>/dev/null || true)
+  if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done; fi
+  rm -rf "$WORK" 2>/dev/null || true
+  exit $rc
+}
+trap cleanup EXIT
 export PORT=${PORT:-18081} JOURNAL_PATH="$WORK/journal.log"
-go build -o "$WORK/server" ./cmd/server
+EXE=""; [ "$(go env GOOS)" = windows ] && EXE=".exe"   # Go no añade .exe solo
+go build -o "$WORK/server$EXE" ./cmd/server
 
-start() { "$WORK/server" >>"$WORK/server.log" 2>&1 & echo $! >"$WORK/pid"; sleep 1; }
+wait_ready() { for _ in $(seq 1 100); do curl -s -o /dev/null "localhost:$PORT/healthz" && return 0; sleep 0.2; done; echo "el servidor no arrancó a tiempo"; return 1; }
+start() { "$WORK/server$EXE" >>"$WORK/server.log" 2>&1 & echo $! >"$WORK/pid"; wait_ready; }
 api() { curl -s "localhost:$PORT$1" "${@:2}"; }
 
 start
@@ -27,7 +36,7 @@ kill -9 "$(cat "$WORK/pid")"; kill $LOAD 2>/dev/null || true; wait 2>/dev/null |
 
 echo ">> reinicio (recuperando desde el journal)"
 start
-grep "journal recuperado" "$WORK/server.log" | tail -1
+{ grep "recuperación completa" "$WORK/server.log" || true; } | tail -1
 after=$(api /audit)
 echo "auditoría antes : $before"
 echo "auditoría después: $after"

@@ -56,7 +56,7 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 | D30 | Solo se registran los comandos que **cambian el estado** (lo rechazado y las lecturas no) | Reproducir solo lo exitoso reconstruye el mismo estado; log más pequeño | Registrar todo: más auditoría de rechazos, a costa de espacio (rechazos irían a logs/métricas) | ✅ |
 | D31 | La marca de tiempo del registro es **informativa**, nunca entra en la lógica | Si el matching usara el reloj, reproducir el log no sería determinista | — | ✅ |
 | D32 | Al reproducir se **verifica que cada orden dé los mismos trades** que registró (`ErrDiverged`) | Detecta no-determinismo o un bug de versión al instante, en vez de corromper saldos | — | ✅ |
-| D33 | Recuperación **completa desde el inicio** del log (sin snapshots) en el MVP | Medido: 700 registros en ~6 ms (≈1-3 s por millón). Snapshots son una optimización con complejidad propia | Snapshot + rotación de segmentos: ver `MEJORAS.md` | 🟡 |
+| D33 | ~~Recuperación completa desde el inicio del log, sin snapshots~~ | **Superada por D51.** Se estimó ~1-3 s por millón de registros, pero al MEDIRLO fue **~7-9 s por millón**: a 5.000 órdenes/s se acumula un millón cada ~3 min, así que el tiempo de reinicio crecía sin límite | — | ❌ reemplazada |
 
 ## Historial y trazabilidad (Fase 4b)
 
@@ -70,6 +70,31 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 | D39 | **Prueba de trazabilidad**: vista SQL `balances_from_history` recalcula el saldo de cada usuario solo con depósitos + trades; `GET /audit/history/{user}` lo contrasta con el motor | Demuestra que el historial explica *cada* centavo y *cada* unidad | — | ✅ |
 | D40 | El servidor **arranca aunque Postgres no esté listo** (por eso `depends_on` sin `service_healthy`) | El mercado no debe depender del historial; el proyector reintenta con backoff exponencial | Esperar a Postgres: acopla disponibilidad del mercado a la del historial | ✅ |
 | D41 | Un único proyector escribiendo por historial | Dos proyectores sobre el mismo Postgres se pisarían | *Leader election* / advisory lock si se escalara | 🟡 (L7) |
+
+## Observabilidad (Fase 5)
+
+| # | Decisión | Por qué | Alternativas / costo | Estado |
+|---|---|---|---|---|
+| D42 | **Prometheus (recoge/guarda/alerta) + Grafana (dashboards)**, no una u otra | Son capas distintas; es el stack más extendido y el formato `/metrics` es estándar abierto leíble por casi cualquier plataforma | Datadog/New Relic: comerciales, requieren cuenta; OpenTelemetry: más amplio pero más pesado para un MVP | ✅ |
+| D43 | `/metrics` y `pprof` en un **puerto de administración separado** (9102) | No exponer métricas ni perfiles junto a la API pública; en producción ese puerto solo es alcanzable desde la red interna | Mismo puerto: más simple, pero filtra información interna | ✅ |
+| D44 | Etiqueta `route` = **patrón** de la ruta, no la URL | Cardinalidad acotada: mil `order_id` no crean mil series (test incluido) | URL real: explota la memoria de Prometheus | ✅ |
+| D45 | El secuenciador emite mediciones por una interfaz `Observer` | El paquete no depende de ninguna librería de métricas; se prueba y se cambia sin tocarlo | Importar Prometheus en el secuenciador: acoplamiento | ✅ |
+| D46 | **No se loguea cada request** (solo anomalías en `warn`; detalle con `LOG_LEVEL=debug`) | A 5.000 req/s un log por request es ruido y costo; las métricas ya dan el agregado | Log por request: útil en debug, no en producción | ✅ |
+| D47 | `/readyz` **sin dependencia de Postgres** | Coherente con D40: el mercado no depende del historial | Readiness que incluya Postgres: un corte del historial sacaría el servicio del balanceador | ✅ |
+| D48 | Generador de carga **open-loop** (latencia desde la hora en que debió salir) | Evita *coordinated omission*: si el servidor se atrasa, el cliente no lo oculta | Closed-loop: más simple pero subestima la latencia bajo carga | ✅ |
+| D49 | Alertas como **reglas en Prometheus** (8), sin Alertmanager | Muestran *qué* se vigilaría y con qué umbrales; enrutar a Slack/PagerDuty es configuración, no diseño | Alertmanager completo: fuera del MVP | 🟡 |
+| D50 | Grafana con **acceso anónimo de solo lectura** y `admin/admin` | Comodidad de demo local: se abre el dashboard sin login | En producción: SSO y sin credenciales por defecto | 🟡 (solo local) |
+
+## Escala de la recuperación (Fase 6)
+
+| # | Decisión | Por qué | Alternativas / costo | Estado |
+|---|---|---|---|---|
+| D51 | **Recuperación = snapshot + cola del journal**; el snapshot es solo una optimización, nunca la fuente de verdad | Medido sobre el mismo journal de 816.904 registros: **7,06 s sin snapshot → 1,10 s con snapshot (cola de 16.893) → 1,02 s tras apagado ordenado**. Ahora depende del tamaño del *estado*, no de cuánto historial haya | Replay completo: lineal en el historial (≈110.000 registros/s) | ✅ |
+| D52 | Si el snapshot falta, está corrupto/truncado, es de OTRO journal, su offset no encaja o su estado es inconsistente ⇒ **se ignora y se reproduce todo** | Un snapshot nunca puede dejar el sistema peor que sin él. Probado en 6 variantes (todas llegan al mismo estado) | Abortar el arranque: más estricto, pero sin necesidad: el journal basta | ✅ |
+| D53 | Snapshot **atómico** (tmp + fsync + rename + fsync del directorio), escrito **en segundo plano**; el secuenciador solo copia el estado | Una caída deja el snapshot anterior o el nuevo, nunca uno a medias. El secuenciador no espera al disco | Escribir desde el secuenciador: pausas de cientos de ms | ✅ |
+| D54 | El snapshot guarda `journal_id` + `offset` del siguiente registro; la lectura verifica la continuidad de la secuencia | Impide aplicar un snapshot a un journal ajeno o con un offset en medio de un registro | — | ✅ |
+| D55 | **Snapshot final en el apagado ordenado**; periódico cada `SNAPSHOT_EVERY` registros (200.000) | Un deploy/reinicio normal no reproduce nada | Solo periódico: reinicios normales con cola | ✅ |
+| D56 | **Invariante de conservación permanente**: suma de todos los saldos == total depositado (en `CheckInvariants`, `/audit` y al restaurar) | Hallazgo de las pruebas: un snapshot con +777 reales de la nada **no se detectaba**; solo se comprobaba que no hubiera negativos y que las reservas cuadraran | Comprobar solo en tests antes/después | ✅ |
 
 ## Plataforma
 
@@ -101,3 +126,8 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 
 - **L8 — La etapa de *build* del `Dockerfile` no se pudo ejecutar en el entorno de desarrollo** (los contenedores de build no tenían salida a internet para `go mod download`). Sí se verificó con **Docker real**: la topología completa del compose (Postgres + app, red, volúmenes, healthchecks, política de reinicio) usando un binario compilado en el host con la misma etapa de runtime; el binario estático compila. Antes de la presentación, correr `docker compose up --build` en una máquina con internet.
 - **L9 — El proyector relee el journal desde el inicio al arrancar** (salta lo ya reflejado). Es O(tamaño del log); con segmentos rotados + índice sería O(1). Ver `MEJORAS.md`.
+- **L10 — Las cifras de rendimiento se midieron en una máquina de 4 núcleos compartida** con disco virtual. Son una referencia, no una garantía; ver `OBSERVABILIDAD.md` (condiciones y colas largas bajo contención). Repetir en la máquina de la presentación.
+- **L11 — Sin trazas distribuidas.** Hay métricas y logs con `request_id`, pero no OpenTelemetry (ver `MEJORAS.md`).
+- **L12 — El conjunto de ids vistos (idempotencia) crece SIN LÍMITE.** Cada orden aceptada deja su id en memoria y en el snapshot (≈40 bytes/id en el snapshot; el snapshot de 816.904 órdenes pesó 33 MiB y cargarlo toma ~1 s). A 5.000 órdenes/s son ≈430 millones de ids al día. Mitigación prevista: **ventana de idempotencia con TTL** (p. ej. 24 h, como hacen las APIs de pagos), expulsando ids antiguos. Afecta memoria, tamaño del snapshot y tiempo de arranque.
+- **L13 — El journal crece sin rotación**: ≈356 bytes por registro (815.000 registros = 290 MiB) ⇒ a 5.000/s ≈ 150 GB al día. Con snapshots ya es posible **truncar/archivar** lo anterior al último snapshot; falta implementar la rotación por segmentos.
+- **L14 — La pausa del snapshot crece con el estado**: medida en 25-35 ms (hasta ~120 ms con contención) para 800.000 ids y 170.000 órdenes. Mitigaciones: menor frecuencia, acotar el conjunto de ids (L12), o copy-on-write.

@@ -123,6 +123,18 @@ type ReplayStats struct {
 // truncada (escritura interrumpida por una caída) y devuelve un Journal listo para seguir
 // escribiendo a continuación del último registro válido.
 func Recover(path string, opts Options, fn func(Record) error) (*Journal, ReplayStats, error) {
+	return RecoverFrom(path, opts, nil, fn)
+}
+
+// Resume indica desde dónde reanudar la lectura (lo aporta un snapshot): el byte donde empieza el
+// registro LastSeq+1. El primer registro leído debe tener exactamente esa secuencia; si no, es error.
+type Resume struct {
+	Offset  int64
+	LastSeq uint64
+}
+
+// RecoverFrom es como Recover pero, con resume != nil, solo reproduce la cola posterior al snapshot.
+func RecoverFrom(path string, opts Options, resume *Resume, fn func(Record) error) (*Journal, ReplayStats, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, ReplayStats{}, err
 	}
@@ -130,7 +142,16 @@ func Recover(path string, opts Options, fn func(Record) error) (*Journal, Replay
 	if err != nil {
 		return nil, ReplayStats{}, err
 	}
-	res, err := scan(f, 0, 0, 0, fn)
+	var start int64
+	var prev uint64
+	if resume != nil {
+		start, prev = resume.Offset, resume.LastSeq
+		if fi, err := f.Stat(); err != nil || start > fi.Size() {
+			f.Close()
+			return nil, ReplayStats{}, fmt.Errorf("%w: el snapshot apunta más allá del final del journal", ErrCorrupt)
+		}
+	}
+	res, err := scan(f, start, prev, 0, fn)
 	if err != nil {
 		f.Close()
 		return nil, ReplayStats{}, err
@@ -160,6 +181,10 @@ func Recover(path string, opts Options, fn func(Record) error) (*Journal, Replay
 	j := &Journal{f: f, w: bufio.NewWriterSize(f, 1<<20), next: res.lastSeq + 1, opts: opts}
 	j.lastSeq.Store(res.lastSeq)
 	j.bytes.Store(res.end)
+	if resume != nil && res.lastSeq < resume.LastSeq {
+		f.Close()
+		return nil, stats, fmt.Errorf("%w: el journal termina antes que el snapshot", ErrCorrupt)
+	}
 	if res.count == 0 && res.lastSeq == 0 { // journal nuevo: se le da identidad
 		id := make([]byte, 16)
 		_, _ = rand.Read(id)
@@ -327,3 +352,20 @@ func (r *Reader) ReadNew(limit int, fn func(Record) error) (int, error) {
 }
 
 func (r *Reader) Close() error { return r.f.Close() }
+
+// ReadID devuelve la identidad del journal (su registro genesis); "" si no tiene.
+func ReadID(path string) (string, error) {
+	rd, err := OpenReader(path)
+	if err != nil {
+		return "", err
+	}
+	defer rd.Close()
+	id := ""
+	_, err = rd.ReadNew(1, func(r Record) error {
+		if r.Kind == KindGenesis {
+			id = r.JournalID
+		}
+		return nil
+	})
+	return id, err
+}
