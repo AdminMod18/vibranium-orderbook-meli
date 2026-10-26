@@ -161,6 +161,16 @@ Ninguna orden aceptada se pierde por un deploy.
 - **Trazabilidad demostrable**: `balances_from_history` (depósitos + trades) == billetera del motor, para todos los usuarios (test de integración con 10.000 registros).
 - **Tablas**: `orders` (estado actual), `trades` (inmutable, append-only), `deposits`, `projector_state`.
 
+### Verificado con Docker real
+| Prueba | Resultado |
+|---|---|
+| `docker compose up`: Postgres + app, ambos `healthy` | ✅ la app arrancó **antes** que Postgres, reintentó y se conectó sola (D40) |
+| Crash real: `kill -9` al proceso de la app con carga (`scripts/drill-docker-crash.sh`) | ✅ Docker la reinició (`RestartCount` sube), recuperó 189 registros en 1,5 ms, totales intactos |
+| `docker compose stop postgres` en pleno uso (`scripts/drill-postgres-down.sh`) | ✅ matching `201`, historial `503`; al volver, `lag=0` y consistente con el motor |
+| SIGTERM (apagado ordenado) | ✅ la app sale limpia (código 0) |
+
+**Detalle útil:** `docker kill` cuenta como parada *manual* y Docker **no** aplica la política de reinicio; para simular un fallo real se mata el *proceso* desde el host (lo que haría el OOM killer). Quien pruebe con `docker kill` verá que la app no vuelve y pensará que está mal: no lo está.
+
 ### Una historia para contar (hallazgo real)
 Un drill falló: el Postgres conservaba `last_seq=10012` de otra corrida, el journal era nuevo y el proyector **se saltó en silencio** los primeros 10.012 registros. Lección: *un read model debe estar atado a la identidad de su fuente*. Solución: registro `genesis` con UUID en el journal y vínculo en `projector_state`; si no coinciden, el proyector se detiene, avisa en logs y se reporta no saludable. Quedó cubierto con un test.
 

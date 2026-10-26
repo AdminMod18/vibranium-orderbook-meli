@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Drill: Postgres se cae EN PLENO USO. El matching debe seguir; el historial debe ponerse al día al volver.
-# Con docker compose (por defecto) o con comandos propios:
-#   PG_STOP="docker compose stop postgres" PG_START="docker compose start postgres"
+# Requiere el Postgres del compose arriba (docker compose up -d postgres) y la app del compose DETENIDA
+# (docker compose stop orderbook): dos proyectores sobre la misma BD se pisarían.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DATABASE_URL=${DATABASE_URL:-postgres://postgres:orderbook@localhost:5432/orderbook}
-PG_STOP=${PG_STOP:-docker compose stop postgres}
-PG_START=${PG_START:-docker compose start postgres}
+# Por defecto usa docker compose; cada comando puede sustituirse (p. ej. PG_STOP="pg_ctlcluster 16 main stop").
+pg_stop()  { if [ -n "${PG_STOP:-}" ];  then eval "$PG_STOP";  else docker compose stop postgres;  fi; }
+pg_start() { if [ -n "${PG_START:-}" ]; then eval "$PG_START"; else docker compose start postgres; fi; }
 # El historial queda atado a un journal; como este drill usa un journal nuevo, se parte de una BD limpia.
-PG_RESET=${PG_RESET:-docker compose exec -T postgres psql -U postgres -d orderbook -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public"}
-$PG_RESET >/dev/null
+pg_reset() {
+  if [ -n "${PG_RESET:-}" ]; then eval "$PG_RESET"
+  else docker compose exec -T postgres psql -q -U postgres -d orderbook -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public"; fi
+}
+pg_reset >/dev/null 2>&1
 
 WORK=$(mktemp -d); trap 'kill "$(cat "$WORK/pid" 2>/dev/null)" 2>/dev/null || true; rm -rf "$WORK"' EXIT
 export PORT=${PORT:-18082} JOURNAL_PATH="$WORK/journal.log" DATABASE_URL
@@ -24,13 +28,13 @@ order s-1 bob SELL 10 >/dev/null; order b-1 alice BUY 10 >/dev/null
 sleep 0.5
 echo ">> con Postgres arriba, GET /orders/b-1:"; api /orders/b-1 | head -c 220; echo
 
-echo ">> CAE POSTGRES"; $PG_STOP >/dev/null 2>&1; sleep 1
+echo ">> CAE POSTGRES"; pg_stop >/dev/null 2>&1; sleep 1
 code=$(order s-2 bob SELL 5 -o /dev/null -w '%{http_code}' | tail -c 3 || true)
 for i in $(seq 1 20); do order s-x$i bob SELL 1 >/dev/null; order b-x$i alice BUY 1 >/dev/null; done
 echo ">> matching sigue durante la caída: alice =" "$(api /balances/alice)"
 echo ">> consulta de historial durante la caída: HTTP $(api /orders/b-1 -o /dev/null -w '%{http_code}')  (503 esperado)"
 
-echo ">> VUELVE POSTGRES"; $PG_START >/dev/null 2>&1
+echo ">> VUELVE POSTGRES"; pg_start >/dev/null 2>&1
 for i in $(seq 1 60); do
   r=$(api /audit/history/alice); [[ "$r" == *'"lag":0'* ]] && break; sleep 0.5
 done

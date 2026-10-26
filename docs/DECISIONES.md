@@ -99,5 +99,5 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 5. ¿La respuesta de la API debe ser síncrona (resultado inmediato) o aceptan `202`?
 6. ¿Cobran comisiones en el MVP?
 
-- **L8 — `docker compose` no se pudo ejecutar en el entorno de desarrollo** (sin daemon de Docker). Se verificó: YAML válido, binario estático compila, y toda la lógica contra un **Postgres 16 real** (mismo motor que usa el compose) con tests de integración y dos drills. El `Dockerfile` y el compose deben probarse en una máquina con Docker antes de la presentación.
+- **L8 — La etapa de *build* del `Dockerfile` no se pudo ejecutar en el entorno de desarrollo** (los contenedores de build no tenían salida a internet para `go mod download`). Sí se verificó con **Docker real**: la topología completa del compose (Postgres + app, red, volúmenes, healthchecks, política de reinicio) usando un binario compilado en el host con la misma etapa de runtime; el binario estático compila. Antes de la presentación, correr `docker compose up --build` en una máquina con internet.
 - **L9 — El proyector relee el journal desde el inicio al arrancar** (salta lo ya reflejado). Es O(tamaño del log); con segmentos rotados + índice sería O(1). Ver `MEJORAS.md`.
