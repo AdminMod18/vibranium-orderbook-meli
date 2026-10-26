@@ -54,7 +54,8 @@ Consejo: durante el paso de carga, **mira el dashboard** y cuenta qué se ve (ó
 | ¿Qué pasa si se cae la app? | Reinicio, snapshot + cola ≈ 1 s; sin snapshot ≈ 7 s por 800 k registros | `drill-docker-crash.sh` |
 | ¿Y si se cae Postgres? | El mercado sigue; historial 503; se reconcilia | `drill-postgres-down.sh` |
 | ¿Y si el disco falla? | Se pierde el journal: limitación conocida (L6). Producción: volumen replicado / réplica / Kafka | `DECISIONES.md` L6, `MEJORAS.md` |
-| ¿Y dos instancias a la vez? | Corromperían el journal: no hay candado (L7). Falta *leader election*/lock | `DECISIONES.md` L7 |
+| ¿Y dos instancias a la vez? | La segunda se **niega a arrancar** (candado del SO: `flock`/`LockFileEx`); si el dueño muere con `kill -9` el candado se libera solo. No es alta disponibilidad: no hay réplica | `drill-single-instance.sh`, D67 |
+| ¿Postgres puede quedar adelantado al journal? | No: el proyector solo lee lo ya sincronizado (fsync) y, si aun así detecta a Postgres por delante, **se detiene y avisa** en vez de saltarse órdenes | `DECISIONES.md` D68 |
 | ¿Cómo evitas el doble gasto? | Reserva de fondos al ingresar + secuenciador único | `smoke.sh` paso 3 |
 | ¿Y reintentos de bots? | `id` de orden = clave de idempotencia (409 si se repite) | `DECISIONES.md` D18 |
 | ¿Qué pasa con días de operación? | La idempotencia está **acotada por una ventana** (5 M ids ≈ 409 MiB); el journal sí crece (≈150 GB/día a 5.000/s): hay que rotarlo (L13). Los snapshots ya lo permiten | `DECISIONES.md` D57, L13 |

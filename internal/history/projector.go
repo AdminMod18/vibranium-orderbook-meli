@@ -13,6 +13,11 @@ import (
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/journal"
 )
 
+// ErrHistoryAhead: Postgres refleja más registros de los que tiene el journal. Es imposible en una operación
+// correcta (el proyector solo lee lo ya sincronizado), así que indica que el journal retrocedió o que se
+// restauró una copia antigua. Proyectar así saltaría en silencio las órdenes nuevas.
+var ErrHistoryAhead = errors.New("el historial de Postgres está por delante del journal")
+
 const (
 	readBatch    = 5000
 	pollInterval = 50 * time.Millisecond
@@ -30,9 +35,10 @@ const (
 // Como solo depende del archivo del journal, puede ejecutarse como proceso aparte (o sustituirse
 // por un consumidor de Kafka) sin tocar el motor.
 type Projector struct {
-	store *Store
-	path  string
-	log   *slog.Logger
+	store   *Store
+	path    string
+	log     *slog.Logger
+	durable func() int64 // si no es nil: solo se lee hasta el offset ya sincronizado en disco
 
 	projected atomic.Uint64 // último seq reflejado en Postgres
 	healthy   atomic.Bool
@@ -42,6 +48,11 @@ type Projector struct {
 func NewProjector(store *Store, journalPath string, log *slog.Logger) *Projector {
 	return &Projector{store: store, path: journalPath, log: log}
 }
+
+// SetDurable limita la lectura del journal al offset ya sincronizado en disco (Journal.DurableBytes).
+// Sin esto el proyector podría reflejar en Postgres órdenes que un corte de energía borraría del journal
+// (y a las que NUNCA se les respondió al cliente). Debe llamarse antes de Run.
+func (p *Projector) SetDurable(fn func() int64) { p.durable = fn }
 
 func (p *Projector) ProjectedSeq() uint64 { return p.projected.Load() }
 func (p *Projector) Healthy() bool        { return p.healthy.Load() }
@@ -106,12 +117,20 @@ func (p *Projector) Run(ctx context.Context) {
 			}
 			continue
 		}
+		if p.durable != nil {
+			rd.SetDurable(p.durable)
+		}
 
 		// 2) bucle principal: leer lote -> escribir transacción -> avanzar
 		err = p.loop(ctx, rd, last, &backoff)
 		rd.Close()
 		if ctx.Err() != nil {
 			return
+		}
+		if errors.Is(err, ErrHistoryAhead) {
+			p.log.Error("proyector DETENIDO: el historial de Postgres está POR DELANTE del journal (el journal retrocedió o se "+
+				"restauró una copia antigua). No se proyecta nada para no mezclar historias. Si el journal es el correcto, "+
+				"vacíe las tablas del historial para reconstruirlo desde cero", "err", err)
 		}
 		if !fail("proyector: reiniciando tras error", err) {
 			return
@@ -121,17 +140,29 @@ func (p *Projector) Run(ctx context.Context) {
 
 func (p *Projector) loop(ctx context.Context, rd *journal.Reader, last uint64, backoff *time.Duration) error {
 	var pending []journal.Record
+	var journalLast uint64 // mayor secuencia leída del journal (incluidas las ya reflejadas que se saltan)
 	for ctx.Err() == nil {
 		if len(pending) == 0 {
-			if _, err := rd.ReadNew(readBatch, func(r journal.Record) error {
+			n, err := rd.ReadNew(readBatch, func(r journal.Record) error {
+				if r.Seq > journalLast {
+					journalLast = r.Seq
+				}
 				if r.Seq > last { // los ya reflejados se saltan
 					pending = append(pending, r)
 				}
 				return nil
-			}); err != nil {
+			})
+			if err != nil {
 				return fmt.Errorf("leyendo journal: %w", err)
 			}
+			if n > 0 && len(pending) == 0 {
+				continue // solo se saltaron registros ya reflejados: seguir leyendo sin dormir
+			}
 			if len(pending) == 0 {
+				// Al día con lo durable. Postgres jamás puede haber reflejado más de lo que el journal tiene.
+				if last > journalLast {
+					return fmt.Errorf("%w: Postgres refleja hasta el registro %d y el journal solo llega al %d", ErrHistoryAhead, last, journalLast)
+				}
 				p.healthy.Store(true)
 				select {
 				case <-ctx.Done():

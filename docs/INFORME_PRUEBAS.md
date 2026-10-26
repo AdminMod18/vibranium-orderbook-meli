@@ -7,15 +7,15 @@
 
 | Capa | Qué demuestra | Cómo se ejecuta |
 |---|---|---|
-| **61 tests de Go** con el detector de carreras (`-race`) | Reglas del libro (precio-tiempo, parciales, precio del maker), reservas, saldos, idempotencia, concurrencia (100 goroutines), journal (cola truncada, CRC, corrupción real), recuperación, snapshots, API y métricas | `go test -race ./...` |
+| **66 tests de Go** con el detector de carreras (`-race`) | Reglas del libro (precio-tiempo, parciales, precio del maker), reservas, saldos, idempotencia, concurrencia (100 goroutines), journal (cola truncada, CRC, corrupción real), recuperación, snapshots, API y métricas | `go test -race ./...` |
 | **Pruebas aleatorias de invariantes** | 20.000 órdenes con cancelaciones: el libro nunca queda cruzado, se conserva el valor, cada trade respeta los límites de precio | dentro de `go test` |
 | **Integración con Postgres real** | El historial reproduce al motor; el saldo recalculado desde depósitos+trades == billetera; reinicio del proyector sin duplicados; Postgres caído; journal ajeno rechazado | `TEST_DATABASE_URL=… go test ./internal/history` |
 | **Matriz de recuperación** | Caída sin apagado ordenado, apagado ordenado, reinicios encadenados y 6 snapshots inservibles (corrupto, truncado, de otro journal, offset inválido, offset fuera de rango, estado inconsistente): **todos llegan al mismo estado** | `go test ./internal/recovery` |
 | **Smoke end-to-end** (22 comprobaciones) | El ciclo completo contra el sistema levantado: cruces, parciales, cancelación, idempotencia, saldo insuficiente, auditoría, historial, métricas, Prometheus y Grafana | `./scripts/smoke.sh` |
 | **Carga** | 5.000 órdenes/s con generador *open-loop* y auditoría de saldos al final | `docker compose run --rm loadgen -rate 5000` |
-| **5 drills** | Ver §3 | `./scripts/drill-*.sh` |
+| **6 drills** | Ver §3 | `./scripts/drill-*.sh` |
 
-Cobertura de sentencias por paquete (cada uno con sus propios tests): exchange 89,8 %, recovery 84,6 %, engine 83,7 %, sequencer 76,9 %, api 62,6 %, journal 53,1 %, snapshot 43,2 %, domain 31,8 %. *(La restauración del libro vive en `engine` pero se prueba también desde `exchange` y `recovery`, y Go no cuenta la cobertura entre paquetes; `history` marca 16 % porque sus tests exigen Postgres y se omiten sin `TEST_DATABASE_URL`, que **debe apuntar a una base de pruebas** —el nombre debe contener `test`— porque esos tests hacen `DROP TABLE`.)*
+Cobertura de sentencias por paquete (cada uno con sus propios tests): exchange 89,8 %, engine 83,7 %, recovery 81,4 %, sequencer 76,9 %, api 62,6 %, journal 62,4 %, snapshot 43,2 %, domain 31,8 %. *(La restauración del libro vive en `engine` pero se prueba también desde `exchange` y `recovery`, y Go no cuenta la cobertura entre paquetes; `history` marca 15 % porque sus tests exigen Postgres y se omiten sin `TEST_DATABASE_URL`, que **debe apuntar a una base de pruebas** —el nombre debe contener `test`— porque esos tests hacen `DROP TABLE`.)*
 
 ## 2. Capacidad
 
@@ -44,6 +44,7 @@ Entorno: **máquina de 4 núcleos compartida** entre generador, app, Postgres, P
 | `drill-docker-crash.sh` | `kill -9` al proceso de la app dentro del compose | Docker la reinicia solo; recupera del volumen; saldos intactos | ✅ (snapshot + cola: 110 ms) |
 | `drill-postgres-down.sh` | Se detiene Postgres en pleno uso | El matching sigue (201), el historial responde 503, y al volver se reconcilia hasta `lag=0` y coincide con el motor | ✅ |
 | `drill-idempotency.sh` | Ventana diminuta (50 ids) y reinicios con ventanas 5, 0 y 100.000 sobre el mismo journal | Reciente=409; fuera de la ventana=orden nueva; orden en el libro=409; saldos idénticos y auditoría `ok` tras cada reinicio | ✅ |
+| `drill-single-instance.sh` | Un 2º proceso (y un 2º contenedor sobre el mismo volumen) intenta abrir el journal; luego `kill -9` al dueño | El 2º se niega (código 1, mensaje claro) sin afectar al 1º; tras la muerte del dueño el candado se libera y el estado recuperado es idéntico | ✅ |
 | `drill-overload.sh` | Cola de 8 posiciones + 512 clientes a máxima velocidad | **307.282 rechazos 503** y 50.601 aceptadas; saldos `ok`; el reinicio recupera todo lo aceptado | ✅ (4 repeticiones) |
 
 **Tiempo de recuperación** (mismo journal de 816.904 registros): sin snapshot **7,06 s** · con snapshot tras crash **1,10 s** · tras apagado ordenado **1,02 s**.
@@ -70,11 +71,14 @@ Cada ítem es un defecto o una creencia errónea que **una prueba descubrió** y
 14. **Los tests de integración podían borrar la base viva** (el README los apuntaba a ella) y **`verify-all`/`drill-postgres-down` borraban datos sin preguntar**. *Corregido:* los tests solo corren contra bases cuyo nombre contenga `test`; los scripts piden confirmación (D65).
 15. **Postgres, Grafana y Prometheus escuchaban en todas las interfaces con claves por defecto.** *Corregido:* solo `127.0.0.1` (D66).
 
+16. **El historial podía contener órdenes que el journal perdería** (el proyector leía tras el `Flush` y antes del `fsync`) y, si el journal retrocedía, **saltaba en silencio** las órdenes nuevas. *Corregido:* solo lee lo sincronizado y se detiene si Postgres está por delante (D68). Mutación de prueba: sin la detección el proyector queda `sano=true` mientras pierde historial.
+17. **Dos instancias corrompían el journal.** *Corregido:* candado del sistema operativo (D67), verificado entre procesos, entre contenedores y tras `kill -9`. Al corregirlo, 4 tests que simulaban una caída dejando el journal abierto empezaron a fallar con `ErrLocked`: era la prueba de que el candado funciona.
+
 ## 5. Limitaciones (lo que NO se probó o no es válido)
 
 - **Windows/Git Bash y Docker Desktop no se pudieron probar** (el desarrollo se hizo en Linux). Los scripts contemplan `.exe`, CRLF y PIDs ajenos, pero requieren que se ejecute `./scripts/preflight.sh` allí.
 - ~~El `Dockerfile` completo no se ejecutó de punta a punta en el entorno de desarrollo~~ → **verificado en una máquina Windows con Docker Desktop**: el build completo termina bien. (En el entorno de desarrollo se probó por partes.)
-- **Una sola instancia y un solo disco**: no hay réplica en espera (L3, L6); un fallo del disco pierde el journal.
+- **Un solo disco y sin réplica en espera** (L3, L6): un fallo del disco pierde el journal. La doble instancia ya se impide (D67), pero eso no es alta disponibilidad.
 - **El journal crece sin rotación** (L13 en `DECISIONES.md`): ≈150 GB/día a 5.000/s. La memoria de idempotencia sí está acotada (D57).
 - **La ventana de idempotencia no se probó con 5 M ids reales de punta a punta** en el servidor (sí en pruebas unitarias con ventanas chicas y midiendo memoria/copia con 5 M ids en un test aislado).
 - Cifras de rendimiento medidas en entorno compartido y con disco virtual (L10).
@@ -83,6 +87,6 @@ Cada ítem es un defecto o una creencia errónea que **una prueba descubrió** y
 
 ```bash
 ./scripts/preflight.sh        # ¿tengo lo necesario?
-./scripts/verify-all.sh       # todo: tests + stack + smoke + carga + 5 drills (tabla PASS/FAIL; pide confirmación porque borra volúmenes)
+./scripts/verify-all.sh       # todo: tests + stack + smoke + carga + 6 drills (tabla PASS/FAIL; pide confirmación porque borra volúmenes)
 ./scripts/demo.sh             # guion interactivo para la presentación
 ```

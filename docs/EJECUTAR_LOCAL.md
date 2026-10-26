@@ -66,7 +66,7 @@ Precios en **centavos** de real; cantidades en **unidades** de Vibranium.
 
 ## 2b) Todo de una vez
 ```bash
-./scripts/verify-all.sh      # tests + stack desde cero + smoke + carga a 5.000/s + 5 drills; termina con una tabla PASS/FAIL
+./scripts/verify-all.sh      # tests + stack desde cero + smoke + carga a 5.000/s + 6 drills; termina con una tabla PASS/FAIL
 ```
 **Atención:** reinicia el stack y **borra los datos locales** (`down -v`): por eso **pide que escribas `SI`** antes de empezar (`ASSUME_YES=1` para automatizar). Con `SKIP_GO=1` se omiten los pasos que requieren Go.
 
@@ -87,6 +87,7 @@ Los drills de arriba usan Docker + `curl`. Este otro necesita **Go** instalado:
 ./scripts/drill-kill9.sh               # kill -9 al servidor (sin Docker) y verificación de saldos
 ./scripts/drill-overload.sh            # sobrecarga: cola diminuta + 512 clientes => 503, sin perder nada
 ./scripts/drill-idempotency.sh         # ventana de idempotencia y reinicios con otra ventana
+./scripts/drill-single-instance.sh     # un 2º proceso sobre el mismo journal se rechaza; --docker prueba un 2º contenedor
 go test -race ./...                    # toda la batería de tests
 ```
 > En Docker Desktop el proceso de la app vive dentro de una VM: el drill usa `docker kill` y reinicia a mano

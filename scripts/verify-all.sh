@@ -46,12 +46,14 @@ step "Levantar el stack desde cero" reset_stack
 TAIL=8 step "Smoke test end-to-end (22 comprobaciones)" ./scripts/smoke.sh
 TAIL=6 step "Carga: 5.000 órdenes/s durante 15 s + auditoría de saldos" $COMPOSE run --rm loadgen -rate 5000 -duration 15s -workers 128
 TAIL=4 step "Drill: crash real de la app (kill -9) y recuperación" ./scripts/drill-docker-crash.sh
+TAIL=5 step "Drill: 2º contenedor sobre el mismo volumen se rechaza" ./scripts/drill-single-instance.sh --docker
 step "Detener la app (para el drill de Postgres)" $COMPOSE stop orderbook
 TAIL=4 step "Drill: Postgres cae en pleno uso" ./scripts/drill-postgres-down.sh
 if [ $HAVE_GO = 1 ]; then
   TAIL=4 step "Drill: kill -9 en plena carga (servidor local)" ./scripts/drill-kill9.sh
   TAIL=4 step "Drill: sobrecarga y backpressure (503)" ./scripts/drill-overload.sh
   TAIL=6 step "Drill: idempotencia con ventana y cambio de ventana entre reinicios" ./scripts/drill-idempotency.sh
+  TAIL=6 step "Drill: una sola instancia por journal (candado)" ./scripts/drill-single-instance.sh
 else skip "Drills kill-9, sobrecarga e idempotencia" "requieren Go"; fi
 step "Dejar el stack limpio y operativo" reset_stack
 

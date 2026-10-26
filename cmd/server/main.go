@@ -71,7 +71,11 @@ func main() {
 	}
 	ex, jr, rep, err := recovery.Recover(journalPath, snapPath, journal.Options{NoSync: os.Getenv("JOURNAL_NOSYNC") == "1"}, idemWindow, log)
 	if err != nil {
-		log.Error("no se pudo recuperar; se aborta para no operar con estado inválido", "err", err)
+		if errors.Is(err, journal.ErrLocked) {
+			log.Error("OTRA instancia ya está usando este journal; se aborta para no corromperlo. Detenga la otra instancia o use otro JOURNAL_PATH", "err", err)
+		} else {
+			log.Error("no se pudo recuperar; se aborta para no operar con estado inválido", "err", err)
+		}
 		os.Exit(1)
 	}
 	log.Info("recuperación completa", "path", journalPath, "desde_snapshot", rep.FromSnapshot, "snapshot_seq", rep.SnapshotSeq,
@@ -125,6 +129,7 @@ func main() {
 		defer st.Close()
 		handler = handler.WithHistory(st)
 		proj = history.NewProjector(st, journalPath, log)
+		proj.SetDurable(jr.DurableBytes) // el historial solo refleja lo que ya está sincronizado en disco
 		go func() { proj.Run(projCtx); close(projDone) }()
 		met.GaugeFunc("projector_seq", "Último registro del journal reflejado en Postgres.", func() float64 { return float64(proj.ProjectedSeq()) })
 		met.GaugeFunc("projector_lag", "Registros del journal aún no reflejados en Postgres.", func() float64 {

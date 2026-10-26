@@ -165,7 +165,8 @@ func TestCrashRecoveryRebuildsIdenticalState(t *testing.T) {
 		}(g)
 	}
 	wg.Wait()
-	s.Stop() // detiene la goroutine, pero NO se cierra el journal: equivale a un kill -9
+	s.Stop()
+	j.Abandon() // suelta archivo y candado SIN sincronizar ni cerrar con orden: equivale a un kill -9
 	if j.Syncs() == 0 || s.Batches() == 0 {
 		t.Fatal("debe haber habido fsyncs")
 	}

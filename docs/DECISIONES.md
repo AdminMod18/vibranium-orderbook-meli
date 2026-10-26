@@ -116,6 +116,13 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 | D65 | Scripts destructivos **piden confirmación** (`ASSUME_YES=1` para automatizar); los tests de integración **se niegan a correr** contra una base cuyo nombre no contenga `test` | Evitar borrar datos por accidente | — | ✅ |
 | D66 | Postgres, Prometheus, Grafana y métricas **solo en `127.0.0.1`**; la API queda abierta | Claves por defecto no deben quedar expuestas a la red local; la API debe poder llamarla un evaluador | API también en loopback: protege más, pero puede impedir probarla desde otro equipo o contenedor | ✅ |
 
+## Instancia única y consistencia del historial (D67-D68)
+
+| # | Decisión | Por qué | Alternativas / costo | Estado |
+|---|---|---|---|---|
+| D67 | **Candado del sistema operativo** (`flock` en Linux/macOS, `LockFileEx` en Windows) sobre `<journal>.lock`, tomado ANTES de leer o escribir | Dos procesos escribiendo el journal lo corromperían. El candado lo libera el sistema operativo al morir el proceso (incluso con `kill -9`): **nunca queda huérfano**, a diferencia de un archivo PID. Un arranque fallido también lo suelta. Verificado entre procesos y entre contenedores sobre el mismo volumen | Archivo PID con `O_EXCL`: tras un crash dejaría el servicio sin poder arrancar. *Leader election* (etcd/Consul): solo hace falta con réplicas | ✅ |
+| D68 | El proyector **solo lee hasta el offset ya sincronizado** (`Journal.DurableBytes`) y, al estar al día, **se detiene si Postgres está por delante del journal** (`ErrHistoryAhead`) | Antes leía el archivo tras el `Flush` y antes del `fsync`: tras un corte de energía, Postgres podía contener órdenes que el journal perdió (y a las que NUNCA se respondió), y las órdenes nuevas con la misma secuencia se **saltaban en silencio**. Una mutación de prueba lo demostró (sin detección: `sano=true, fallos=0`) | Proyectar de todos modos: historial falso. Reconstruir Postgres automáticamente: borraría datos derivados sin que nadie lo decida; se prefiere avisar y que lo decida una persona | ✅ |
+
 ## Plataforma
 
 | # | Decisión | Por qué | Estado |
@@ -129,7 +136,7 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 
 - ~~**L1 — Estado en memoria.**~~ Resuelta en Fase 4a: journal + recuperación (probado con `scripts/drill-kill9.sh`). Queda la limitación de disco único: ver L6.
 - **L6 — El journal vive en UN disco.** Si se pierde el volumen se pierde el log. Mitigación de producción: volumen replicado / réplica en espera / Kafka con replicación (ver `MEJORAS.md`).
-- **L7 — No hay candado de proceso único.** Dos instancias escribiendo el mismo journal lo corromperían. En Docker se corre una; en producción hay que usar *leader election* o un lock de archivo (ver `MEJORAS.md`).
+- ~~**L7 — No hay candado de proceso único.**~~ **Resuelta con D67:** un segundo proceso (o contenedor) sobre el mismo journal se niega a arrancar. Queda una limitación: el candado impide la doble instancia pero **no es alta disponibilidad** (no hay réplica ni *leader election*; ver L3).
 - **L2 — Reintento tras timeout.** Si el cliente corta la conexión después de que la orden entró a la cola, la orden *sí* se procesa pero el cliente no ve el resultado; al reintentar recibe `409`. **Mitigado en 4b**: `GET /orders/{id}` consulta el estado (eventualmente consistente: una orden muy reciente puede tardar unos ms en aparecer). Mejora pendiente: devolver el resultado original en el reintento idempotente.
 - **L3 — Un solo secuenciador = un solo punto de falla del mercado.** Mitigación: recuperación rápida desde snapshot+log; en producción, réplica en espera (*hot standby*) consumiendo el mismo log.
 - **L4 — Un instrumento.** El diseño ya separa por mercado, pero el MVP solo expone Vibranium/BRL.
@@ -145,6 +152,7 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 6. ¿Cobran comisiones en el MVP?
 
 - ~~**L8 — La etapa de build del `Dockerfile` no se pudo ejecutar en el entorno de desarrollo.**~~ **Resuelta:** `docker compose up --build` se ejecutó con éxito en una máquina Windows con Docker Desktop (el build completo, `go mod download` incluido, terminó sin errores).
+- **L18 — Dos límites del proyector, aceptados:** (a) `SetDurable` funciona **dentro del mismo proceso** que escribe el journal; si el proyector corriera como proceso aparte necesitaría un archivo auxiliar con el offset sincronizado; (b) si el journal retrocede y luego **vuelve a crecer por encima** del `last_seq` de Postgres *antes* de que arranque el proyector, la detección por secuencia no lo ve (haría falta guardar una huella del último registro proyectado).
 - **L15 — Puertos del host fijos.** Un PostgreSQL ya instalado en la máquina ocupaba el 5432 y el compose no arrancaba. *Corregido:* puertos configurables por `.env` (`.env.example`), `preflight` los detecta y explica qué hacer, y los scripts los respetan.
 - **L16 — La API no tiene autenticación**: cualquiera puede depositar y **cancelar cualquier orden por su id** (`DELETE /orders/{id}` no comprueba al dueño). Aceptado por el desafío (no hace falta login); en producción requiere identidad y autorización.
 - **L17 — `GET /audit`, la copia del snapshot y las lecturas corren dentro del secuenciador**: con 1.000.000 de órdenes abiertas `/audit` bloquea el motor ≈ 0,55 s y la copia del snapshot ≈ 0,6 s (medido). Mitigación pendiente: lecturas desde una copia, fuera del camino de escritura.

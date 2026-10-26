@@ -104,7 +104,7 @@ func recoverAt(t *testing.T, jpath, spath string) (*exchange.Exchange, recovery.
 	if err != nil {
 		t.Fatalf("recuperación: %v", err)
 	}
-	t.Cleanup(func() { jr.Close() })
+	jr.Close() // solo interesa el estado recuperado; soltar el candado para poder reabrir el journal
 	return ex, rep
 }
 
@@ -312,7 +312,7 @@ func recoverWindow(t *testing.T, jpath, spath string, window int) (*exchange.Exc
 	if err != nil {
 		t.Fatalf("la recuperación con ventana %d falló: %v", window, err)
 	}
-	t.Cleanup(func() { jr.Close() })
+	jr.Close() // solo interesa el estado recuperado; soltar el candado para poder reabrir el journal
 	return ex, rep
 }
 

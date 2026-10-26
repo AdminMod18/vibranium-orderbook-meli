@@ -106,11 +106,16 @@ type Journal struct {
 	opts   Options
 	dirty  bool
 	closed bool
+	lock   *os.File // sostiene el candado de instancia única mientras el journal esté abierto
 
 	// Contadores legibles desde otras goroutines (métricas, API).
 	lastSeq atomic.Uint64
 	bytes   atomic.Int64
 	syncs   atomic.Uint64
+	// durable es el offset hasta el cual el archivo ya está en disco (fsync hecho). Los consumidores que
+	// leen el archivo (el proyector a Postgres) NO deben pasar de aquí: lo que está en la caché del
+	// sistema operativo pero sin fsync puede perderse con un corte de energía.
+	durable atomic.Int64
 }
 
 // ReplayStats describe lo ocurrido al recuperar.
@@ -140,6 +145,21 @@ func RecoverFrom(path string, opts Options, resume *Resume, fn func(Record) erro
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, ReplayStats{}, err
 	}
+	// Candado de instancia única ANTES de leer o escribir nada.
+	lk, err := acquireLock(path + ".lock")
+	if err != nil {
+		return nil, ReplayStats{}, err
+	}
+	j, st, err := recoverLocked(path, opts, resume, fn)
+	if err != nil {
+		lk.Close() // un arranque fallido no debe dejar el candado tomado
+		return nil, st, err
+	}
+	j.lock = lk
+	return j, st, nil
+}
+
+func recoverLocked(path string, opts Options, resume *Resume, fn func(Record) error) (*Journal, ReplayStats, error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
 		return nil, ReplayStats{}, err
@@ -153,7 +173,7 @@ func RecoverFrom(path string, opts Options, resume *Resume, fn func(Record) erro
 			return nil, ReplayStats{}, fmt.Errorf("%w: el snapshot apunta más allá del final del journal", ErrCorrupt)
 		}
 	}
-	res, err := scan(f, start, prev, 0, fn)
+	res, err := scan(f, start, 0, prev, 0, fn)
 	if err != nil {
 		f.Close()
 		return nil, ReplayStats{}, err
@@ -183,6 +203,7 @@ func RecoverFrom(path string, opts Options, resume *Resume, fn func(Record) erro
 	j := &Journal{f: f, w: bufio.NewWriterSize(f, 1<<20), next: res.lastSeq + 1, opts: opts}
 	j.lastSeq.Store(res.lastSeq)
 	j.bytes.Store(res.end)
+	j.durable.Store(res.end) // lo que hay en disco al arrancar es, por definición, lo que sobrevivió
 	if resume != nil && res.lastSeq < resume.LastSeq {
 		f.Close()
 		return nil, stats, fmt.Errorf("%w: el journal termina antes que el snapshot", ErrCorrupt)
@@ -245,6 +266,7 @@ func (j *Journal) Sync() error {
 		}
 	}
 	j.dirty = false
+	j.durable.Store(j.bytes.Load()) // todo lo agregado hasta aquí ya está volcado y sincronizado
 	j.syncs.Add(1)
 	return nil
 }
@@ -254,11 +276,27 @@ func (j *Journal) Close() error {
 		return nil
 	}
 	j.closed = true
-	if err := j.Sync(); err != nil {
-		j.f.Close()
-		return err
+	err := j.Sync()
+	if cerr := j.f.Close(); err == nil {
+		err = cerr
 	}
-	return j.f.Close()
+	if j.lock != nil {
+		j.lock.Close() // libera el candado
+	}
+	return err
+}
+
+// Abandon suelta el archivo y el candado SIN vaciar el buffer ni hacer fsync: lo mismo que deja la muerte
+// del proceso. Existe para simular caídas en las pruebas.
+func (j *Journal) Abandon() {
+	if j.closed {
+		return
+	}
+	j.closed = true
+	j.f.Close()
+	if j.lock != nil {
+		j.lock.Close()
+	}
 }
 
 // Métricas simples para observabilidad.
@@ -266,6 +304,9 @@ func (j *Journal) LastSeq() uint64 { return j.lastSeq.Load() }
 func (j *Journal) NextSeq() uint64 { return j.lastSeq.Load() + 1 }
 func (j *Journal) Bytes() int64    { return j.bytes.Load() }
 func (j *Journal) Syncs() uint64   { return j.syncs.Load() }
+
+// DurableBytes es el offset hasta el que el archivo está sincronizado en disco.
+func (j *Journal) DurableBytes() int64 { return j.durable.Load() }
 
 // --- lectura ---
 
@@ -276,15 +317,22 @@ type scanResult struct {
 }
 
 // scan lee registros desde start. prevSeq es el seq esperado previo (0 = no verificar el primero).
-// limit > 0 corta tras ese número de registros (lectura por lotes).
+// limit > 0 corta tras ese número de registros (lectura por lotes). end > 0 acota la lectura a ese offset.
 // Una cola incompleta (EOF a mitad de registro, o CRC malo en el ÚLTIMO registro) se tolera:
 // es el rastro de una caída durante la escritura. Cualquier otra anomalía es corrupción real.
-func scan(f *os.File, start int64, prevSeq uint64, limit int, fn func(Record) error) (scanResult, error) {
-	if _, err := f.Seek(start, io.SeekStart); err != nil {
-		return scanResult{}, err
+func scan(f *os.File, start, end int64, prevSeq uint64, limit int, fn func(Record) error) (scanResult, error) {
+	if end <= 0 { // 0 = hasta el final actual del archivo
+		fi, err := f.Stat()
+		if err != nil {
+			return scanResult{}, err
+		}
+		end = fi.Size()
 	}
-	r := bufio.NewReaderSize(f, 1<<20)
 	res := scanResult{end: start, lastSeq: prevSeq}
+	if end <= start {
+		return res, nil
+	}
+	r := bufio.NewReaderSize(io.NewSectionReader(f, start, end-start), 1<<20)
 	for limit <= 0 || res.count < limit {
 		var hdr [headerSize]byte
 		if _, err := io.ReadFull(r, hdr[:]); err != nil {
@@ -333,7 +381,12 @@ type Reader struct {
 	f       *os.File
 	offset  int64
 	lastSeq uint64
+	durable func() int64 // si no es nil, no se lee más allá de este offset
 }
+
+// SetDurable limita la lectura al offset que devuelva fn (p. ej. Journal.DurableBytes): el lector solo
+// ve lo que ya está sincronizado en disco, nunca bytes que podrían perderse con un corte de energía.
+func (r *Reader) SetDurable(fn func() int64) { r.durable = fn }
 
 func OpenReader(path string) (*Reader, error) {
 	f, err := os.Open(path)
@@ -345,7 +398,13 @@ func OpenReader(path string) (*Reader, error) {
 
 // ReadNew entrega a fn hasta limit registros (0 = todos) agregados desde la última llamada.
 func (r *Reader) ReadNew(limit int, fn func(Record) error) (int, error) {
-	res, err := scan(r.f, r.offset, r.lastSeq, limit, fn)
+	var end int64
+	if r.durable != nil {
+		if end = r.durable(); end <= r.offset {
+			return 0, nil // aún no hay nada nuevo que esté en disco
+		}
+	}
+	res, err := scan(r.f, r.offset, end, r.lastSeq, limit, fn)
 	if err != nil {
 		return res.count, err
 	}

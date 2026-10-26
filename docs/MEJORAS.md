@@ -12,8 +12,8 @@ Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 | R4 | `GET /book` O(L²) dentro del secuenciador | ✅ Corregido (D64); `/audit` y la copia del snapshot siguen siendo O(órdenes) (L17) |
 | R6 | Puertos y claves por defecto expuestos | ✅ Corregido (D66); la API sigue sin autenticación a propósito (L16) |
 | R10 | Scripts destructivos sin confirmación; tests contra la base viva; deriva documental | ✅ Corregido (D65) |
-| R2 | El proyector lee el journal antes del fsync y no detecta que Postgres esté adelantado | ⏳ **Pendiente (P1):** leer solo hasta el offset sincronizado y comprobar `last_seq` de Postgres ≤ final del journal |
-| R3 | Sin candado de instancia única sobre el journal | ⏳ **Pendiente (P1):** `flock`/lockfile |
+| R2 | El proyector leía el journal antes del fsync y no detectaba que Postgres estuviera adelantado | ✅ **Corregido (D68)**; residual en L18 |
+| R3 | Sin candado de instancia única sobre el journal | ✅ **Corregido (D67)**; no es alta disponibilidad (L3) |
 | R5 | Cola de 50.000 con timeout de 2 s ⇒ órdenes que se ejecutan tras un 504 | ⏳ **Pendiente (P1):** alinear `QUEUE_SIZE` ≈ ritmo × timeout y medirlo |
 | R7 | Journal sin rotación, sin alerta de disco, sin réplica | ⏳ Pendiente (P1 alerta de tamaño / P2 rotación y réplica) |
 | R8 | Interoperabilidad: los evaluadores deben fondear billeteras con `/deposits`; precios enteros en centavos | ⏳ **Pendiente de DECISIÓN:** preguntar a los evaluadores; ver el contrato en el README |
@@ -25,7 +25,7 @@ Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 |---|---|---|---|
 | 🔴 | ¿Qué pasa si se cae el secuenciador? | Reinicio + replay del journal (ms). Probado con `kill -9`. Mientras reinicia hay indisponibilidad (no se pierde nada confirmado) | **Hot standby**: segunda instancia consumiendo el mismo log, promovida por *leader election* ⇒ RTO de segundos |
 | 🔴 | ¿Y si se pierde el disco? | Se pierde el journal (L6) | Volumen replicado (EBS multi-AZ / réplica síncrona) o mover el log a **Kafka/Redpanda** con replicación (`acks=all`) |
-| 🔴 | ¿Qué pasa si dos instancias arrancan a la vez? | Corrompen el journal (L7) | Lock de archivo (`flock`) como mínimo; en producción *lease* en etcd/Consul (fencing token) |
+| 🔴 | ¿Qué pasa si dos instancias arrancan a la vez? | **Se rechaza la segunda** (candado del SO, D67); si muere la primera el candado se libera solo | *Leader election* + réplica en espera para alta disponibilidad real |
 | 🟠 | ¿Qué pasa si Postgres cae? | **Probado** (`drill-postgres-down.sh`): el matching sigue, historial `503`, se reconcilia solo al volver | Alertar por *lag* del proyector (Fase 5) |
 | 🔴 | ¿Cuánto tarda en recuperarse? | **Hecho (Fase 6):** snapshot + cola ≈ 1 s; sin snapshot ≈ 7-9 s por millón de registros (medido) | Rotación de segmentos del journal y archivado de lo anterior al snapshot (L13) |
 | 🔴 | ¿Qué pasa tras días de operación? | **Idempotencia acotada** por ventana (D57: 5 M ids ≈ 409 MiB). Queda el journal: ≈150 GB/día a 5.000/s (L13) | **Rotación de segmentos** del journal y archivado de lo anterior al último snapshot |

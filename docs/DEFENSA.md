@@ -134,6 +134,8 @@ Ninguna orden aceptada se pierde por un deploy.
 | Falla `write`/`fsync` (disco lleno/dañado) | No se puede garantizar durabilidad | `panic` (fail-stop): mejor caído que mentir; se reinicia desde lo durable |
 | Corrupción real del journal | Estado dudoso | El servidor se niega a arrancar y avisa; requiere intervención humana |
 | Se pierde el disco | Se pierde el log | **Limitación L6**: en producción, volumen replicado/standby (ver `MEJORAS.md`) |
+| Se arranca una 2ª instancia sobre el mismo journal | Lo corrompería (dos escritores) | **Se rechaza**: candado del SO (`flock`/`LockFileEx`) tomado antes de leer; se libera solo si el dueño muere (`drill-single-instance.sh`). No es alta disponibilidad |
+| El journal retrocede (copia antigua, cola perdida) con Postgres ya adelantado | El historial mostraría órdenes inexistentes y saltaría las nuevas | El proyector **solo lee lo sincronizado** y, si ve a Postgres por delante, **se detiene y avisa** (D68); el mercado sigue |
 | La API cae pero el secuenciador no | Sin entrada de requests | Réplicas stateless detrás de un balanceador |
 
 ### Números para citar
@@ -250,7 +252,7 @@ Cola de 8 posiciones y 512 clientes a máxima velocidad (≈32.000 req/s de pres
 - *¿Qué pasa si el snapshot está corrupto?* Se ignora y se reproduce el journal: el snapshot nunca es la verdad.
 - *¿Cuánto escala?* 16.000 órdenes/s medidas (3,2× el objetivo) en una máquina de 4 núcleos compartida; el matching usa el 2,3 % del CPU. Más allá: particionar por instrumento y separar API/secuenciador.
 - *¿Qué pasa con días de operación?* La memoria de idempotencia está **acotada** por una ventana (5 M ids ≈ 409 MiB; configurable). Queda el crecimiento del journal (≈150 GB/día a 5.000/s): los snapshots ya permiten truncar lo anterior, falta implementar la rotación por segmentos (L13).
-- *¿Cómo sabes que funciona?* `./scripts/verify-all.sh`: tests con race detector, smoke de 22 comprobaciones, carga a 5.000/s y 5 drills, con tabla PASS/FAIL.
+- *¿Cómo sabes que funciona?* `./scripts/verify-all.sh`: tests con race detector, smoke de 22 comprobaciones, carga a 5.000/s y 6 drills, con tabla PASS/FAIL.
 
 ### Idempotencia con ventana (`internal/exchange/idwindow.go`)
 - **Qué hace:** recuerda los últimos N ids aceptados (5 M por defecto, `IDEMPOTENCY_WINDOW`). Reintento reciente ⇒ 409. Más antiguo que la ventana ⇒ se trata como orden nueva. Si la orden **sigue en el libro**, se rechaza igual.

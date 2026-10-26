@@ -180,6 +180,7 @@ func TestProjectorMirrorsEngineAndSurvivesRestart(t *testing.T) {
 	p1ctx, stop1 := context.WithCancel(ctx)
 	done1 := make(chan struct{})
 	p1 := history.NewProjector(st, path, log)
+	p1.SetDurable(j.DurableBytes) // como en producción: solo se proyecta lo ya sincronizado
 	go func() { p1.Run(p1ctx); close(done1) }()
 
 	const users = 20
@@ -201,6 +202,7 @@ func TestProjectorMirrorsEngineAndSurvivesRestart(t *testing.T) {
 		t.Fatal("el proyector detenido no debería estar al día")
 	}
 	p2 := history.NewProjector(st, path, log)
+	p2.SetDurable(j.DurableBytes)
 	go p2.Run(ctx)
 	waitProjected(t, p2, j)
 	verify(t, st, ex, tr, users) // sin duplicados ni faltantes tras retomar desde last_seq
@@ -270,5 +272,57 @@ func TestProjectorRefusesForeignJournal(t *testing.T) {
 	time.Sleep(700 * time.Millisecond)
 	if pB.Healthy() || pB.ProjectedSeq() != 0 {
 		t.Fatalf("el proyector de un journal ajeno no debe proyectar (healthy=%v seq=%d)", pB.Healthy(), pB.ProjectedSeq())
+	}
+}
+
+// R2: si el journal RETROCEDE (se restauró una copia antigua o se perdió su cola) mientras Postgres ya había
+// reflejado más, el proyector debe DETENERSE y avisar; antes saltaba en silencio las órdenes nuevas porque
+// sus secuencias eran menores que el last_seq de Postgres.
+func TestProjectorStopsWhenPostgresIsAheadOfTheJournal(t *testing.T) {
+	st := openStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	path := filepath.Join(t.TempDir(), "journal.log")
+	j, _, err := journal.Recover(path, journal.Options{}, func(journal.Record) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := sequencer.New(exchange.New(), 1000, sequencer.WithJournal(j))
+	for i := 0; i < 30; i++ {
+		if err := s.Deposit(ctx, fmt.Sprintf("u%d", i), 100, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p1ctx, stop1 := context.WithCancel(ctx)
+	p1 := history.NewProjector(st, path, log)
+	p1.SetDurable(j.DurableBytes)
+	done := make(chan struct{})
+	go func() { p1.Run(p1ctx); close(done) }()
+	waitProjected(t, p1, j)
+	stop1()
+	<-done
+	s.Stop()
+	j.Close()
+	projected, _ := st.LastSeq(ctx)
+
+	// El journal "retrocede": se pierde su cola (como tras un corte de energía sin fsync, o una restauración).
+	fi, _ := os.Stat(path)
+	if err := os.Truncate(path, fi.Size()/2); err != nil {
+		t.Fatal(err)
+	}
+
+	p2 := history.NewProjector(st, path, log)
+	go p2.Run(ctx)
+	deadline := time.Now().Add(5 * time.Second)
+	for p2.Failures() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if p2.Failures() == 0 || p2.Healthy() {
+		t.Fatalf("el proyector debe detenerse y reportarse no saludable (fallos=%d, sano=%v)", p2.Failures(), p2.Healthy())
+	}
+	if after, _ := st.LastSeq(ctx); after != projected {
+		t.Fatalf("no debe tocar el historial: last_seq %d -> %d", projected, after)
 	}
 }
