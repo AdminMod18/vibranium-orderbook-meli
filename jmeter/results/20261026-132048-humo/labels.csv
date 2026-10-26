@@ -1,0 +1,14 @@
+etiqueta,muestras,ok,errores,media_ms,p50_ms,p95_ms,p99_ms,max_ms
+DELETE /orders/{id},289,289,0,1.44,1.0,4.0,6.0,8
+ERR-ESPERADO cancelar inexistente -> 404,7,7,0,0.86,1.0,2.0,2.0,2
+ERR-ESPERADO cantidad 0 -> 400,7,7,0,1.43,1.0,5.0,5.0,5
+ERR-ESPERADO id duplicado -> 409,15,15,0,0.60,1.0,1.0,1.0,1
+ERR-ESPERADO id inválido -> 400,7,7,0,0.86,1.0,3.0,3.0,3
+ERR-ESPERADO lado inválido -> 400,15,15,0,0.67,1.0,2.0,2.0,2
+ERR-ESPERADO sin saldo -> 422,15,15,0,0.73,1.0,2.0,2.0,2
+GET /balances/{user},592,592,0,0.79,1.0,2.0,4.0,14
+GET /book?depth=5,148,148,0,0.97,1.0,3.0,6.0,6
+POST /orders,14815,14815,0,1.55,1.0,3.0,6.0,25
+SETUP GET /audit (línea base),1,1,0,42.00,42.0,42.0,42.0,42
+SETUP POST /deposits,100,100,0,1.98,2.0,4.0,7.0,7
+TEARDOWN GET /audit (conservación),1,1,0,5.00,5.0,5.0,5.0,5

@@ -131,7 +131,7 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 | D70 | Métrica `journal_disk_free_bytes` + alertas `JournalDiskLow` (< 2 GiB) y `JournalDiskFillingUp` (se llena en < 6 h), y **pruebas unitarias de las 13 reglas de alerta** con `promtool` | Con el disco lleno el servicio hace fail-stop; avisar antes. Ninguna alerta se había disparado jamás en una prueba: ahora cada regla tiene un caso que DEBE dispararla y, cuando importa, otro que NO (p. ej. el 503 de backpressure no cuenta como error del servidor). Una mutación de umbrales las hace fallar | Probar las alertas provocando fallos reales: lento y no determinista. Frenar escrituras antes de llenar el disco (modo degradado): más estados; se prefiere alertar | ✅ |
 | D71 | `GOMEMLIMIT=3GiB` y `mem_limit=4g` en el compose; `scripts/seed.sh` opcional para fondear billeteras | El soak midió RSS 3,7 GiB sin límites (L20); un límite blando hace que el GC apriete antes de que el kernel mate el proceso (OOM). Los evaluadores pueden fondear a mano (`POST /deposits`) o con el script, sin que el sistema imponga usuarios | Auto-fondeo dentro del servidor: mezcla datos de prueba con el sistema real y rompe la conservación `saldos == depositado` que audita `/audit` | ✅ (ver validación en INFORME §2b) |
 
-## Optimización guiada por evidencia (D72-D75)
+## Optimización guiada por evidencia (D72-D76)
 
 | # | Decisión | Por qué | Alternativas / costo | Estado |
 |---|---|---|---|---|
@@ -139,6 +139,7 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 | D73 | `journal.Reader` **reutiliza** su `bufio` y su buffer de payload | Cada `ReadNew` reservaba 1 MiB aunque no hubiera nada nuevo: 49 % de la basura del servidor | Reducir el tamaño del buffer (menos efecto) | ✅ |
 | D74 | `snapshot.Write` serializa en **streaming** (mismo formato) | Reservaba 4,4× el archivo (932 MiB por 210 MiB) cada 200.000 registros: picos de heap/RSS | Otro formato binario (más rápido, pero rompe compatibilidad y legibilidad) | ✅ |
 | D75 | `SNAPSHOT_EVERY` por defecto **1.000.000** (antes 200.000) | La pausa de captura (≈ 0,2 s por millón de órdenes en el libro) domina el p99: 12 ms sin snapshots, 101-342 ms cada 200.000, 47 ms cada 1 M (A/B intercalado) | Corrección de fondo: réplica de seguimiento que genera los snapshots (duplica memoria, L21). Costo del cambio: ≤ ~1 M de registros que reproducir tras un *crash* (≈ 9 s); el reinicio ordenado sigue sin reproducir nada | ✅ (configurable) |
+| D76 | `Book.Depth` en **O(niveles)**: cada nivel guarda su cantidad pendiente (`level.qty`), mantenida de forma incremental | La prueba de 30 min con JMeter se degradó (5.500 → 4.100 órd/s; p99 23 → 87 ms) y el perfil de CPU mostró `Depth` con el 18,4 % de toda la CPU: recorría todas las órdenes de los niveles consultados dentro del secuenciador | Cachear el resultado un instante (stale); mover la lectura fuera del secuenciador (más complejo: necesita copia consistente). La cantidad incremental añade una resta/suma por cruce y es verificable (test de consistencia) | ✅ |
 
 ## Plataforma
 
@@ -157,7 +158,7 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 - **L2 — Reintento tras timeout.** Si el cliente corta la conexión después de que la orden entró a la cola, la orden *sí* se procesa pero el cliente no ve el resultado; al reintentar recibe `409`. **Mitigado en 4b**: `GET /orders/{id}` consulta el estado (eventualmente consistente: una orden muy reciente puede tardar unos ms en aparecer). Mejora pendiente: devolver el resultado original en el reintento idempotente.
 - **L3 — Un solo secuenciador = un solo punto de falla del mercado.** Mitigación: recuperación rápida desde snapshot+log; en producción, réplica en espera (*hot standby*) consumiendo el mismo log.
 - **L4 — Un instrumento.** El diseño ya separa por mercado, pero el MVP solo expone Vibranium/BRL.
-- **L5 — `Depth()` recorre el libro.** Es para consulta/observabilidad, no para el camino caliente.
+- **L5 — `Depth()` se ejecuta dentro del secuenciador.** ~~Recorría todas las órdenes de los niveles consultados~~ (corregido en D76: ahora O(niveles) con la cantidad por nivel mantenida incrementalmente). Sigue ordenando una copia de los niveles (O(L log L)) y bloqueando el motor mientras corre; es de consulta, no del camino caliente.
 
 ## Preguntas para hacerle al equipo evaluador (el desafío invita a preguntar)
 
@@ -177,7 +178,7 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 - **L15 — Puertos del host fijos.** Un PostgreSQL ya instalado en la máquina ocupaba el 5432 y el compose no arrancaba. *Corregido:* puertos configurables por `.env` (`.env.example`), `preflight` los detecta y explica qué hacer, y los scripts los respetan.
 - **L16 — La API no tiene autenticación**: cualquiera puede depositar y **cancelar cualquier orden por su id** (`DELETE /orders/{id}` no comprueba al dueño). Aceptado por el desafío (no hace falta login); en producción requiere identidad y autorización.
 - **L17 — `GET /audit`, la copia del snapshot y las lecturas corren dentro del secuenciador**: con 1.000.000 de órdenes abiertas `/audit` bloquea el motor ≈ 0,55 s y la copia del snapshot ≈ 0,6 s (medido). Mitigación pendiente: lecturas desde una copia, fuera del camino de escritura.
-- **L9 — El proyector relee el journal desde el inicio al arrancar** (salta lo ya reflejado). Es O(tamaño del log); con segmentos rotados + índice sería O(1). Ver `MEJORAS.md`.
+- **L9 — ~~El proyector relee el journal desde el inicio al arrancar~~ → CORREGIDO en D72:** reanuda por offset y solo relee el último registro proyectado (antes: O(tamaño del log), ≈ 60 s con 7,5 M registros). Si el offset guardado no sirve, vuelve a leer desde el inicio. Sigue sin haber segmentos rotados (L13).
 - **L10 — Las cifras de rendimiento se midieron en una máquina de 4 núcleos compartida** con disco virtual. Son una referencia, no una garantía; ver `OBSERVABILIDAD.md` (condiciones y colas largas bajo contención). Repetir en la máquina de la presentación.
 - **L11 — Sin trazas distribuidas.** Hay métricas y logs con `request_id`, pero no OpenTelemetry (ver `MEJORAS.md`).
 - ~~**L12 — El conjunto de ids vistos crecía sin límite.**~~ **Resuelta con D57** (ventana de idempotencia): memoria, snapshot y arranque quedan acotados. Queda la contrapartida de diseño: un reintento posterior a la ventana se trata como orden nueva (ver D57).

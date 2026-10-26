@@ -113,6 +113,8 @@ Muestreo cada 5 s (`antes/e1_memoria.log`), en el instante del RSS máximo (3.08
 | H9 | Recorrer los niveles de precio acelera `Capture` | ❌ No confirmada | 200-650 ms vs 220-250 ms (ruidoso); no se adoptó |
 | H10 | Las pausas STW de 450-870 ms son del código | ❓ Abierta | no reproducidas |
 | H11 | El entorno (CPU *steal*) explica el p99 | ❌ Descartada como causa principal | steal 1,5-2 %, idle 20 % |
+| H12 | En 30 min, JMeter degrada el sistema por el **GC** (heap creciente) | ❌ Rechazada | `gctrace`: el GC consumió 2 % de la CPU acumulada en 15 min |
+| H13 | En 30 min, la degradación (5.500 → 4.100 órd/s; p99 23 → 87 ms) viene de **`Book.Depth`**: recorría todas las órdenes de los niveles consultados dentro del secuenciador | ✅ Verificada | perfil de CPU a los 12 min: `Depth` = 18,4 % de la CPU total y ≈ 50 % del tiempo del secuenciador; test de escala (×62 con 100× más órdenes por nivel); desaparece tras el cambio (§8) |
 
 ## 5. Cambios realizados (solo los respaldados por evidencia)
 
@@ -124,6 +126,7 @@ Muestreo cada 5 s (`antes/e1_memoria.log`), en el instante del RSS máximo (3.08
 | **C2** | **`journal.Reader` reutiliza** su `bufio` de 1 MiB y su buffer de payload. | `TestReadNewDoesNotAllocateAMebibytePerCall` (1.084 B por llamada; con la mutación 1.049.979 B) · `TestReaderBufferReuseDoesNotCorruptRecords` (registros de tamaños muy distintos, lecturas de 1, 3, 50…). |
 | **C3** | **`snapshot.Write` en *streaming*** (elemento a elemento, mismo formato `[len][crc][JSON]`, CRC y longitud al vuelo, cabecera al final). | `TestStreamedJSONEqualsMarshal` (5 estados, incl. vacíos y >4096 elementos: el JSON equivale a `json.Marshal` y `Read` devuelve el mismo estado) · `TestWriteAllocationDoesNotScaleWithTheState` (0,27× el archivo; con `json.Marshal` 4,7×). |
 | **C4** | **`SNAPSHOT_EVERY` por defecto 1.000.000** (antes 200.000). Es configuración: `SNAPSHOT_EVERY=200000` lo revierte. | A/B de §3.4. Costo: cola de ≤ ~1 M de registros tras un crash (≈ 9 s). |
+| **C6** | **`Book.Depth` en O(niveles)**: cada nivel mantiene su cantidad pendiente (`level.qty`) de forma incremental (alta, ejecución parcial, baja). Hallazgo de la prueba de 30 min con JMeter (§8). | `TestDepthCostDoesNotGrowWithOrdersPerLevel` (×0,8 con 100× más órdenes por nivel; con el recorrido antiguo ×62) · `TestLevelQtyStaysConsistentAcrossFillsCancelsAndRestore` (30.000 órdenes con cancelaciones y restauración: la cantidad incremental == la recalculada; sin descontar lo ejecutado al maker falla con *«qty incremental=138, recalculada=54»*). |
 | **C5** | Observabilidad: métrica `projector_rescanned_records_total`, `scripts/latency-breakdown.sh`, pruebas de medición de escala. | – |
 | (previo) | `GOMEMLIMIT=3GiB`, `mem_limit=4g`, `scripts/seed.sh` | – |
 
@@ -150,3 +153,24 @@ Muestreo cada 5 s (`antes/e1_memoria.log`), en el instante del RSS máximo (3.08
 3. **Un incidente que sí validó un diseño:** al quedarse sin disco, el servidor hizo *fail-stop* (`panic: fsync del journal falló: no space left on device`), Docker lo reinició y no se perdió nada de lo confirmado. Está documentado como hallazgo.
 4. **Sin corrección de fondo para la pausa del snapshot.** Solo se espació. Si hace falta un p99 < 50 ms con estados de millones de órdenes, la opción respaldada por los datos es tomar los snapshots desde una **réplica de seguimiento** (un segundo `Exchange` que reproduce el journal) para que el secuenciador nunca se pause; cuesta **duplicar la memoria** y es un cambio de arquitectura (de paso, el primer paso hacia una réplica en espera, L3/L6). No se implementó sin una decisión del equipo.
 5. **Windows / Docker Desktop:** no se ejecutaron estos cambios allí.
+
+## 8. Hallazgo posterior: la degradación de la prueba de 30 min (JMeter) y su corrección
+
+**Qué se vio (hecho).** En la corrida de 30 min con JMeter (sin Postgres, tasa objetivo 5.000 órd/s) el sistema **se degradó mientras el estado crecía**:
+throughput 5.456 → 5.640 → 4.951 → 4.391 → 4.398 → **4.140 órd/s** (bloques de 5 min) y p99 mediano de 23 → **87 ms**. Desde Prometheus, por bloques de 5 min:
+el p99 del **matching+liquidación** (por lote) subió de **1,9 a 29,6 ms**, el de la **cola** de 7,7 a 81,5 ms, mientras el fsync solo pasó de 2,4 a 4,1 ms. El motor (no JMeter) fue quien se frenó: `engine_orders_per_s` cayó igual que el throughput del cliente.
+
+**Hipótesis y cómo se descartaron / verificaron (con una segunda corrida de 15 min con `gctrace` y perfiles de CPU, `evidencia/diagnostico_degradacion/`):**
+- ❌ *GC*: el GC acumulado fue **2 %** de la CPU tras 15 min (3 ciclos/min, marcado de 0,5 s); no puede explicar una caída del 25 %.
+- ❌ *fsync / disco*: p99 de 2,4 → 4,1 ms.
+- ✅ **`engine.(*Book).Depth`**: el perfil de CPU de 30 s a los 12 min muestra `Depth` con **5,72 s de 31 s (18,4 % de TODA la CPU)**, ≈ la mitad de lo que hace el secuenciador (`processBatch` 11,5 s), y `Order.Remaining` (llamado desde `Depth`) con otro 13,6 % plano. A los 2 min, con el libro pequeño, `Depth` no aparece. Causa en el código: `Depth` sumaba `Remaining()` **recorriendo todas las órdenes de cada nivel consultado** (listas enlazadas con fallos de caché), y se ejecuta **dentro del secuenciador**, es decir, mientras se ejecuta no se procesa ninguna orden. El plan de JMeter pide `GET /book?depth=5` en el 1 % de las iteraciones (≈ 50 consultas/s); con millones de órdenes en espera repartidas en ≈ 100 niveles (decenas de miles por nivel) cada consulta bloqueaba el motor ≈ 4 ms de media.
+- Esto ya figuraba como limitación (L5: «Depth recorre el libro; es para consulta») pero **subestimado**: se creía O(niveles) y era O(órdenes de los niveles consultados).
+
+**Cambio (C6).** Cada nivel mantiene `qty` (cantidad pendiente) de forma incremental: se suma al insertar, se resta lo ejecutado en cada cruce y lo que queda al cancelar. `Depth` pasa a ser O(niveles) (se sigue ordenando una copia de los niveles). No cambia el orden de ejecución, ni lo que se persiste, ni la salida de `Depth`: el test restaura desde un snapshot y compara con la suma recalculada.
+Medición aislada (`TestDepthCostDoesNotGrowWithOrdersPerLevel`, 200 consultas de `Depth(5)`): **con 100 niveles de 50 órdenes = 1,8 ms; con 100 niveles de 5.000 órdenes = 1,4 ms** (antes: 0,5 ms → 30,8 ms, ×62).
+
+**Resultado de repetir los 30 minutos con la corrección** (misma configuración: JMeter 128 hilos, tasa objetivo 5.000, sin Postgres, estado nuevo):
+
+PENDIENTE_30MIN
+
+**Conclusión honesta.** El hallazgo y la corrección están respaldados por un perfil y por tests; el efecto sobre los 30 minutos se mide arriba. Esto **no** significa que el sistema esté listo para producción: sigue habiendo lecturas pesadas dentro del secuenciador (`/audit`, la copia del snapshot — L17/L21), y la prueba sigue siendo en disco virtual y sin Postgres.

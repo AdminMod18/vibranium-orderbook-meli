@@ -1,0 +1,10 @@
+{
+  "escenario": "sostenida", "label": "reinicio-despues", "run_id": "2026102614504666f9",
+  "inicio_epoch": 1793026246, "fin_epoch": 1793026351, "jmeter_rc": 0,
+  "commit": "4f2ed7c", "rama": "claude/focused-babbage-2ppmql",
+  "jmeter": "5.6.3",
+  "java": "openjdk version 21.0.12.1 2026-08-18",
+  "cpu_nucleos": 4, "memoria_mb": 16091,
+  "disco_libre_gb_al_terminar": "2",
+  "fecha_utc": "2026-10-26T14:52:32Z"
+}

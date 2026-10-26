@@ -1,0 +1,16 @@
+>> 1) carga con JMeter (humo)
+  resumen: 14254 órdenes ok, 0 con error, 477.2/s media; p50=1.0 p95=5.0 p99=13.0 ms; errores totales (todas las etiquetas)=0
+>> terminado (rc JMeter=0) en jmeter/results/20261026-145619-humo-recuperacion-carga
+>> 2) foto antes de la caída
+{"error":"","ok":true,"total_brl":10000100000000,"total_vib":10000000100}
+  [OK]    auditoría ok antes de la caída
+>> 3) SIGKILL a la app y reinicio
+   volvió en 0 s
+>> 4) comparación
+{"error":"","ok":true,"total_brl":10000100000000,"total_vib":10000000100}
+  [OK]    totales y saldos de 5 usuarios IDÉNTICOS tras la caída
+>> 5) integridad financiera sobre el sistema recuperado
+  resumen: 0 órdenes ok, 0 con error, 0.0/s media; p50=nan p95=nan p99=nan ms; errores totales (todas las etiquetas)=8
+!! LA INTEGRIDAD FINANCIERA FALLÓ (ver jmeter/results/20261026-145706-integridad-recuperacion-integridad/errors.csv)
+  [FALLO] el plan de integridad falló
+RECUPERACIÓN CON FALLOS

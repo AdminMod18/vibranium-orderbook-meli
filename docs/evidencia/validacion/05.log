@@ -1,0 +1,15 @@
+>> integridad: jmeter/vibranium-integrity.jmx  hilos=1 rampa=0s duración=0s tasa=0/s run_id=202610261456137bcd  ->  jmeter/results/20261026-145613-integridad
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts -Djavax.net.ssl.trustStoreType=JKS -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=43701 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|api.anthropic.com|api-staging.anthropic.com|api-pr-preview.anthropic.com|mcp-proxy.anthropic.com|mcp-proxy-staging.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+WARN StatusConsoleListener The use of package scanning to locate plugins is deprecated and will be removed in a future release
+WARN StatusConsoleListener The use of package scanning to locate plugins is deprecated and will be removed in a future release
+WARN StatusConsoleListener The use of package scanning to locate plugins is deprecated and will be removed in a future release
+WARN StatusConsoleListener The use of package scanning to locate plugins is deprecated and will be removed in a future release
+Creating summariser <summary>
+Created the tree successfully using jmeter/vibranium-integrity.jmx
+Starting standalone test @ 2026 Oct 26 14:56:15 UTC (1793026575112)
+Waiting for possible Shutdown/StopTestNow/HeapDump/ThreadDump message on port 4445
+summary =     26 in 00:00:02 =   14.2/s Avg:     2 Min:     0 Max:    26 Err:     0 (0.00%)
+Tidying up ...    @ 2026 Oct 26 14:56:17 UTC (1793026577256)
+... end of run
+  resumen: 0 órdenes ok, 0 con error, 0.0/s media; p50=nan p95=nan p99=nan ms; errores totales (todas las etiquetas)=0
+>> terminado (rc JMeter=0) en jmeter/results/20261026-145613-integridad

@@ -1,0 +1,109 @@
+
+[1m▶ Tests unitarios y de concurrencia (go test -race)[0m
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/domain	1.014s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/engine	2.261s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/exchange	8.161s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/history	1.658s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/journal	1.474s
+?   	github.com/AdminMod18/vibranium-orderbook-meli/internal/metrics	[no test files]
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/recovery	10.157s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/sequencer	2.798s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/snapshot	3.683s
+?   	github.com/AdminMod18/vibranium-orderbook-meli/internal/wallet	[no test files]
+
+[1m▶ Alertas: pruebas unitarias de las 13 reglas (promtool)[0m
+  SUCCESS: 13 rules found
+
+  SUCCESS
+
+[1m▶ Levantar el stack desde cero[0m
+
+
+[1m▶ Smoke test end-to-end (22 comprobaciones)[0m
+  [OK]    GET /readyz = 200
+  [OK]    /metrics (puerto de administración) expone las órdenes
+  [OK]    /metrics expone la cola del secuenciador
+  [OK]    /metrics NO está en el puerto público de la API
+  [OK]    Prometheus está leyendo las métricas de la app
+  [OK]    Grafana tiene el dashboard provisionado
+
+SMOKE OK: todo funciona.
+
+[1m▶ Carga: 5.000 órdenes/s durante 15 s + auditoría de saldos[0m
+órdenes completadas : 75001 en 15.003s  =>  4999 órdenes/s efectivas
+latencia            : p50=2.034ms  p90=5.49ms  p99=20.492ms  p99.9=64.404ms  max=73.874ms
+respuestas          :  201×75001
+cancelaciones       : 2346 (ya ejecutadas/no encontradas: 701)
+auditoría de saldos : {"error":"","ok":true,"total_brl":100000001000000,"total_vib":100000000100}
+OK
+
+[1m▶ Drill: crash real de la app (kill -9) y recuperación[0m
+>> Docker la reinició sola: RestartCount=1
+{"time":"2026-10-26T14:55:26.699092145Z","level":"INFO","msg":"recuperación completa","path":"/data/journal.log","desde_snapshot":false,"snapshot_seq":0,"registros_reproducidos":77089,"last_seq":7708
+auditoría: {"error":"","ok":true,"total_brl":100000002000000,"total_vib":100000001100}
+OK: crash real recuperado desde el volumen; saldos intactos
+
+[1m▶ Drill: 2º contenedor sobre el mismo volumen se rechaza[0m
+  [OK]    el 2º contenedor sobre el mismo volumen se negó a arrancar (código 1)
+  [OK]    mensaje claro: OTRA instancia ya está usando este journal; se aborta para no corromperlo. Detenga la otr
+  [OK]    la instancia original sigue sirviendo
+OK: Docker impide dos instancias sobre el mismo volumen
+
+[1m▶ Detener la app (para el drill de Postgres)[0m
+ Container vibranium-verify-orderbook-1 Stopping 
+ Container vibranium-verify-orderbook-1 Stopped 
+
+[1m▶ Drill: Postgres cae en pleno uso[0m
+>> consulta de historial durante la caída: HTTP 503  (503 esperado)
+>> VUELVE POSTGRES
+>> auditoría tras recuperarse: {"conclusive":true,"consistent":true,"engine":{"brl_total":997000,"vib_total":30},"history":{"brl_total":997000,"vib_total":30},"journal_seq":46,"lag":0,"projected_seq"
+OK: el matching no se detuvo y el historial se reconcilió solo con el journal
+
+[1m▶ Drill: kill -9 en plena carga (servidor local)[0m
+{"time":"2026-10-26T14:55:34.683828295Z","level":"INFO","msg":"recuperación completa","path":"/tmp/tmp.vJKsvvQAfG/journal.log","desde_snapshot":false,"snapshot_seq":0,"registros_reproducidos":243,"la
+auditoría antes : {"error":"","ok":true,"total_brl":4000000,"total_vib":4000}
+auditoría después: {"error":"","ok":true,"total_brl":4000000,"total_vib":4000}
+OK: totales conservados e invariantes intactos tras kill -9
+
+[1m▶ Drill: sobrecarga y backpressure (503)[0m
+>> parada ordenada (SIGTERM) y reinicio: todo lo aceptado debe recuperarse
+{"error":"","ok":true,"total_brl":50000000000000,"total_vib":50000000000}
+{"time":"2026-10-26T14:55:49.623670768Z","level":"INFO","msg":"recuperación completa","path":"/tmp/tmp.PyZnp2kcvt/journal.log","desde_snapshot":true,"snapshot_seq":40219,"registros_reproducidos":0,"l
+OK: con sobrecarga se rechazó con 503, no se perdió ni descuadró nada y la recuperación es exacta
+
+[1m▶ Drill: idempotencia con ventana y cambio de ventana entre reinicios[0m
+  [OK]      auditoría con ventana=5 => "ok":true
+  [OK]    arranca con ventana=0 y los saldos son idénticos => {"user_id":"alice","brl_free":999980,"brl_held":20,"vib_free":0,"vib_held":0}
+  [OK]      auditoría con ventana=0 => "ok":true
+  [OK]    arranca con ventana=100000 y los saldos son idénticos => {"user_id":"alice","brl_free":999980,"brl_held":20,"vib_free":0,"vib_held":0}
+  [OK]      auditoría con ventana=100000 => "ok":true
+OK: idempotencia con ventana verificada (reciente=409, antiguo=nuevo, en libro=409, reinicio con otra ventana=ok)
+
+[1m▶ Drill: una sola instancia por journal (candado)[0m
+  [OK]    auditoría de A: ok
+>> kill -9 al dueño: el candado debe liberarse SOLO
+  [OK]    B arrancó tras la muerte de A (sin candado huérfano)
+  [OK]    B recuperó exactamente el estado de A
+  [OK]    auditoría de B: ok
+OK: una sola instancia por journal; el candado se libera al morir el dueño
+
+[1m▶ Dejar el stack limpio y operativo[0m
+
+
+[1m════════ RESUMEN ════════[0m
+  [32mPASS[0m  Tests unitarios y de concurrencia (go test -race)              14s
+  [32mPASS[0m  Alertas: pruebas unitarias de las 13 reglas (promtool)         4s
+  [32mPASS[0m  Levantar el stack desde cero                                   15s
+  [32mPASS[0m  Smoke test end-to-end (22 comprobaciones)                      1s
+  [32mPASS[0m  Carga: 5.000 órdenes/s durante 15 s + auditoría de saldos    15s
+  [32mPASS[0m  Drill: crash real de la app (kill -9) y recuperación          2s
+  [32mPASS[0m  Drill: 2º contenedor sobre el mismo volumen se rechaza        1s
+  [32mPASS[0m  Detener la app (para el drill de Postgres)                     0s
+  [32mPASS[0m  Drill: Postgres cae en pleno uso                               5s
+  [32mPASS[0m  Drill: kill -9 en plena carga (servidor local)                 3s
+  [32mPASS[0m  Drill: sobrecarga y backpressure (503)                         14s
+  [32mPASS[0m  Drill: idempotencia con ventana y cambio de ventana entre reinicios 3s
+  [32mPASS[0m  Drill: una sola instancia por journal (candado)                2s
+  [32mPASS[0m  Dejar el stack limpio y operativo                              19s
+
+[32mTODO VERIFICADO.[0m

@@ -1,0 +1,10 @@
+{
+  "escenario": "integridad", "label": "despues-30min-sinpg-integridad", "run_id": "202610261409431184",
+  "inicio_epoch": 1793023783, "fin_epoch": 1793023788, "jmeter_rc": 0,
+  "commit": "4f2ed7c", "rama": "claude/focused-babbage-2ppmql",
+  "jmeter": "5.6.3",
+  "java": "openjdk version 21.0.12.1 2026-08-18",
+  "cpu_nucleos": 4, "memoria_mb": 16091,
+  "disco_libre_gb_al_terminar": "6",
+  "fecha_utc": "2026-10-26T14:09:49Z"
+}

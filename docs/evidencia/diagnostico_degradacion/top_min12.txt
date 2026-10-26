@@ -1,0 +1,12 @@
+top - 15:09:49 up  2:06,  0 user,  load average: 36.79, 33.37, 27.43
+Tasks: 103 total,   1 running, 102 sleeping,   0 stopped,   0 zombie
+%Cpu(s): 60.4 us, 18.9 sy,  0.0 ni, 13.2 id,  1.9 wa,  0.0 hi,  3.8 si,  1.9 st 
+MiB Mem :  16091.2 total,   7334.5 free,   2766.0 used,   6343.7 buff/cache     
+MiB Swap:      0.0 total,      0.0 free,      0.0 used.  13325.2 avail Mem 
+
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+22178 root      20   0 5081484 957568  26004 S 169.2   5.8  25:30.45 java
+21874 10001     20   0 2248740   1.0g  10644 S  76.9   6.4  13:26.26 server
+29704 root      20   0    8952   5272   3152 R   7.7   0.0   0:00.01 top
+    1 root      20   0   25556   6280   5796 S   0.0   0.0   0:06.00 process_api
+    2 root      20   0       0      0      0 S   0.0   0.0   0:00.01 kthreadd

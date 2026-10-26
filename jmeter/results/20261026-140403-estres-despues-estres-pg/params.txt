@@ -1,0 +1,12 @@
+escenario=estres
+plan=jmeter/vibranium-load.jmx
+host=172.19.0.3
+port=8080
+protocol=http
+threads=256
+rampup_s=60
+duration_s=300
+tps_objetivo=0
+users=100
+run_id=202610261404036940
+with_history=false
