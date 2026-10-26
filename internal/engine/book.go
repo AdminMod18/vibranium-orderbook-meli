@@ -40,6 +40,11 @@ type level struct {
 	price  domain.Price
 	orders *list.List // de *domain.Order; el frente es la más antigua
 	index  int        // posición en el heap (para poder borrar el nivel en O(log n))
+	// qty es la cantidad PENDIENTE total del nivel (suma de Remaining de sus órdenes), mantenida de forma incremental en
+	// add, remove y en cada ejecución parcial. Sin ella, Depth recorría TODAS las órdenes de los niveles consultados DENTRO del
+	// secuenciador: con millones de órdenes en espera, un GET /book?depth=5 llegó a ser el 18 % de la CPU y la causa de que
+	// el p99 del matching creciera de 0,9 a 16,9 ms en 15 min (perfil de CPU, docs/OPTIMIZACION.md §8).
+	qty domain.Qty
 }
 
 // priceHeap ordena los niveles de un lado: el mejor precio queda en la raíz.
@@ -97,11 +102,13 @@ func (h *halfBook) add(o *domain.Order) *list.Element {
 		h.byPrice[o.Price] = l
 		heap.Push(h.heap, l)
 	}
+	l.qty += o.Remaining()
 	return l.orders.PushBack(o)
 }
 
 func (h *halfBook) remove(o *domain.Order, e *list.Element) {
 	l := h.byPrice[o.Price]
+	l.qty -= o.Remaining() // 0 si salió por estar completamente ejecutada (ya se descontó al ejecutarse)
 	l.orders.Remove(e)
 	if l.orders.Len() == 0 {
 		heap.Remove(h.heap, l.index)
@@ -236,6 +243,7 @@ func (b *Book) match(taker *domain.Order) (trades []domain.Trade, truncated bool
 		qty := min(taker.Remaining(), maker.Remaining())
 		taker.Filled += qty
 		maker.Filled += qty
+		best.qty -= qty // el maker sigue en el nivel (o saldrá con Remaining()==0): su cantidad pendiente baja lo ejecutado
 
 		b.tradeSeq++
 		t := domain.Trade{
@@ -298,11 +306,7 @@ func (b *Book) Depth(side domain.Side, n int) []Level {
 	}
 	out := make([]Level, 0, n)
 	for _, l := range levels[:n] {
-		var q domain.Qty
-		for e := l.orders.Front(); e != nil; e = e.Next() {
-			q += e.Value.(*domain.Order).Remaining()
-		}
-		out = append(out, Level{Price: l.price, Qty: q})
+		out = append(out, Level{Price: l.price, Qty: l.qty})
 	}
 	return out
 }

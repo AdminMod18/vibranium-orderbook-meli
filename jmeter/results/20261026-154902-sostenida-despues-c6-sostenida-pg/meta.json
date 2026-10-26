@@ -1,0 +1,10 @@
+{
+  "escenario": "sostenida", "label": "despues-c6-sostenida-pg", "run_id": "202610261549026f24",
+  "inicio_epoch": 1793029742, "fin_epoch": 1793030348, "jmeter_rc": 0,
+  "commit": "1659909", "rama": "claude/focused-babbage-2ppmql",
+  "jmeter": "5.6.3",
+  "java": "openjdk version 21.0.12.1 2026-08-18",
+  "cpu_nucleos": 4, "memoria_mb": 16091,
+  "disco_libre_gb_al_terminar": "2",
+  "fecha_utc": "2026-10-26T15:59:09Z"
+}

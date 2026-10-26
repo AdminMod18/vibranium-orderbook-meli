@@ -7,7 +7,7 @@
 
 | Capa | Qué demuestra | Cómo se ejecuta |
 |---|---|---|
-| **77 tests de Go** con el detector de carreras (`-race`) | Reglas del libro (precio-tiempo, parciales, precio del maker), reservas, saldos, idempotencia, concurrencia (100 goroutines), journal (cola truncada, CRC, corrupción real), recuperación, snapshots, API y métricas | `go test -race ./...` |
+| **79 tests de Go** con el detector de carreras (`-race`) | Reglas del libro (precio-tiempo, parciales, precio del maker), reservas, saldos, idempotencia, concurrencia (100 goroutines), journal (cola truncada, CRC, corrupción real), recuperación, snapshots, API y métricas | `go test -race ./...` |
 | **Pruebas aleatorias de invariantes** | 20.000 órdenes con cancelaciones: el libro nunca queda cruzado, se conserva el valor, cada trade respeta los límites de precio | dentro de `go test` |
 | **Integración con Postgres real** | El historial reproduce al motor; el saldo recalculado desde depósitos+trades == billetera; reinicio del proyector sin duplicados; Postgres caído; journal ajeno rechazado | `TEST_DATABASE_URL=… go test ./internal/history` |
 | **Matriz de recuperación** | Caída sin apagado ordenado, apagado ordenado, reinicios encadenados y 6 snapshots inservibles (corrupto, truncado, de otro journal, offset inválido, offset fuera de rango, estado inconsistente): **todos llegan al mismo estado** | `go test ./internal/recovery` |
@@ -59,6 +59,10 @@ Entorno: **máquina de 4 núcleos compartida** entre generador, app, Postgres, P
 - **La memoria no es solo la ventana.** El perfil del heap tras el último reinicio muestra 712 MiB vivos: 305 MiB de la ventana de idempotencia (5 M ids), ≈ 232 MiB del libro restaurado y 172 MiB de basura de la decodificación del snapshot. El pico de 2,7 GiB/RSS 3,7 GiB es la suma de GC (hasta 2× lo vivo) y la copia del estado al hacer el snapshot. **Hay que dimensionar el contenedor a ≥ 4 GiB con la ventana por defecto** o bajar `IDEMPOTENCY_WINDOW`; hoy `docker-compose.yml` no pone límite de memoria ni `GOMEMLIMIT` (L20).
 - **Se corrió con Postgres detenido** durante la corrida 1 (para no agotar el disco del sandbox), así que no mide el costo conjunto; en la corrida 2 el proyector se puso al día solo. Entorno compartido de 4 núcleos y disco virtual (fsync casi instantáneo): las cifras no son de producción.
 
+## 2d. Pruebas con Apache JMeter
+
+Planes reproducibles en [`jmeter/`](../jmeter/README.md): **integridad financiera** (25 pasos con importes exactos; 27 con `WITH_HISTORY=true`), **carga** (gradual, sostenida, estrés; validación de negocio de cada respuesta y conservación de valor al final) y **recuperación tras `kill -9`**. El informe visual con las corridas y la correlación con el motor está en [`jmeter/report/index.html`](../jmeter/report/index.html) y los resultados en `jmeter/results/`. Las cifras y sus límites, en [DEFENSA_TECNICA.md](DEFENSA_TECNICA.md) §6-§7.
+
 ## 2c. Fase de optimización
 
 Diagnóstico, hipótesis verificadas/rechazadas, cambios y comparación antes/después: **[OPTIMIZACION.md](OPTIMIZACION.md)** (registros crudos en `evidencia/`). Lo esencial: el p90 de 24,6 s del soak era un transitorio causado por el re-escaneo del journal por el proyector al arrancar (corregido); con el sistema caliente la cola de latencia la domina la pausa del snapshot (p99 12 ms sin snapshots vs 101-342 ms cada 200.000; 47 ms cada 1.000.000).
@@ -109,6 +113,8 @@ Cada ítem es un defecto o una creencia errónea que **una prueba descubrió** y
 22. **`ReadNew` reservaba un buffer de 1 MiB por llamada** (49 % de toda la basura del servidor) y **`snapshot.Write` reservaba 4,4× el archivo** (932 MiB por 210 MiB). *Corregido* (D73, D74): −68 % de basura, ciclos de GC 16,9 → 4,6 por minuto.
 23. **Cada snapshot pausa al secuenciador** (150-230 ms por millón de órdenes en el libro): domina el p99. *Mitigado* espaciándolos (D75); la corrección de fondo queda como decisión (L21).
 24. **Sin espacio en disco el servidor hace fail-stop** (`panic: fsync del journal falló: no space left on device`), se reinicia y no pierde lo confirmado: ocurrió de verdad durante las pruebas y el diseño se comportó como estaba previsto. La alerta `JournalDiskLow` existe para evitarlo.
+
+25. **`GET /book` degradaba el motor al crecer el libro** (hallado por la prueba de 30 min con JMeter, que pide el libro en el 1 % de las iteraciones): `Depth` recorría todas las órdenes de los niveles consultados dentro del secuenciador (18,4 % de la CPU a los 12 min; throughput 5.500 → 4.100 órd/s; p99 23 → 87 ms). *Corregido* (D76): O(niveles). Test de escala (×62 → ×0,8) y de consistencia; detalle en OPTIMIZACION.md §8.
 
 ## 5. Limitaciones (lo que NO se probó o no es válido)
 

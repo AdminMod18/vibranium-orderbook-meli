@@ -1,0 +1,12 @@
+escenario=humo
+plan=jmeter/vibranium-load.jmx
+host=localhost
+port=8080
+protocol=http
+threads=32
+rampup_s=5
+duration_s=30
+tps_objetivo=500
+users=100
+run_id=202610261602421c78
+with_history=false

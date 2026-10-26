@@ -1,0 +1,10 @@
+{
+  "escenario": "humo", "label": "recuperacion-carga", "run_id": "202610261606570081",
+  "inicio_epoch": 1793030817, "fin_epoch": 1793030851, "jmeter_rc": 0,
+  "commit": "1659909", "rama": "claude/focused-babbage-2ppmql",
+  "jmeter": "5.6.3",
+  "java": "openjdk version 21.0.12.1 2026-08-18",
+  "cpu_nucleos": 4, "memoria_mb": 16091,
+  "disco_libre_gb_al_terminar": "5",
+  "fecha_utc": "2026-10-26T16:07:32Z"
+}

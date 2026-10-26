@@ -87,6 +87,8 @@ El estado se guarda en `data/journal.log` (`JOURNAL_PATH`).
 - [docs/MEJORAS.md](docs/MEJORAS.md) — backlog de arquitectura: preguntas probables y siguiente paso.
 - [docs/OBSERVABILIDAD.md](docs/OBSERVABILIDAD.md) — métricas, alertas, dashboard, resultados medidos y runbook.
 - [docs/INFORME_PRUEBAS.md](docs/INFORME_PRUEBAS.md) — qué se probó, resultados medidos, hallazgos y limitaciones.
+- [docs/DEFENSA_TECNICA.md](docs/DEFENSA_TECNICA.md) — informe de defensa: arquitectura, decisiones, invariantes, recuperación, rendimiento, riesgos y preguntas de entrevista (con etiquetas hecho/hipótesis/limitación/recomendación).
+- [jmeter/README.md](jmeter/README.md) — planes de JMeter (carga, integridad, recuperación), cómo ejecutarlos y el informe visual de rendimiento.
 - [docs/OPTIMIZACION.md](docs/OPTIMIZACION.md) — fase de optimización: diagnóstico de la latencia, hipótesis verificadas y rechazadas, cambios y resultados antes/después.
 - [docs/PRESENTACION.md](docs/PRESENTACION.md) — guion de la presentación, mensajes clave y preguntas probables.
 - [docs/EJECUTAR_LOCAL.md](docs/EJECUTAR_LOCAL.md) — cómo correrlo en tu máquina.

@@ -1,0 +1,13 @@
+?   	github.com/AdminMod18/vibranium-orderbook-meli/cmd/loadgen	[no test files]
+?   	github.com/AdminMod18/vibranium-orderbook-meli/cmd/server	[no test files]
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/api	1.310s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/domain	1.020s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/engine	5.914s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/exchange	9.543s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/history	31.685s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/journal	2.177s
+?   	github.com/AdminMod18/vibranium-orderbook-meli/internal/metrics	[no test files]
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/recovery	12.103s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/sequencer	3.052s
+ok  	github.com/AdminMod18/vibranium-orderbook-meli/internal/snapshot	3.696s
+?   	github.com/AdminMod18/vibranium-orderbook-meli/internal/wallet	[no test files]

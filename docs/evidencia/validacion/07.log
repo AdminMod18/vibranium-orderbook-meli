@@ -1,0 +1,15 @@
+>> ventana de 50 ids
+  [OK]    reintento RECIENTE (n60) se rechaza => 409
+  [OK]    id ANTIGUO fuera de la ventana (first) se acepta como nuevo => 201
+  [OK]    orden que sigue en el libro (resting) se rechaza aunque su id ya salió de la ventana => 409
+  [OK]    tamaño de la ventana acotado a 50 => 50
+  [OK]    ids expulsados: 13
+  [OK]    auditoría de saldos => "ok":true
+>> reinicios con OTRA ventana (el journal tiene el id 'first' aceptado dos veces)
+  [OK]    arranca con ventana=5 y los saldos son idénticos => {"user_id":"alice","brl_free":999980,"brl_held":20,"vib_free":0,"vib_held":0}
+  [OK]      auditoría con ventana=5 => "ok":true
+  [OK]    arranca con ventana=0 y los saldos son idénticos => {"user_id":"alice","brl_free":999980,"brl_held":20,"vib_free":0,"vib_held":0}
+  [OK]      auditoría con ventana=0 => "ok":true
+  [OK]    arranca con ventana=100000 y los saldos son idénticos => {"user_id":"alice","brl_free":999980,"brl_held":20,"vib_free":0,"vib_held":0}
+  [OK]      auditoría con ventana=100000 => "ok":true
+OK: idempotencia con ventana verificada (reciente=409, antiguo=nuevo, en libro=409, reinicio con otra ventana=ok)

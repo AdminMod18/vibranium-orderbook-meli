@@ -1,0 +1,53 @@
+{
+  "meta": {
+    "escenario": "integridad",
+    "label": "recuperacion-integridad",
+    "run_id": "202610261603292365",
+    "inicio_epoch": 1793030609,
+    "fin_epoch": 1793030614,
+    "jmeter_rc": 0,
+    "commit": "1659909",
+    "rama": "claude/focused-babbage-2ppmql",
+    "jmeter": "5.6.3",
+    "java": "openjdk version 21.0.12.1 2026-08-18",
+    "cpu_nucleos": 4,
+    "memoria_mb": 16091,
+    "disco_libre_gb_al_terminar": "5",
+    "fecha_utc": "2026-10-26T16:03:35Z"
+  },
+  "params": {
+    "escenario": "integridad",
+    "plan": "jmeter/vibranium-integrity.jmx",
+    "host": "localhost",
+    "port": "8080",
+    "protocol": "http",
+    "threads": "1",
+    "rampup_s": "0",
+    "duration_s": "0",
+    "tps_objetivo": "0",
+    "users": "100",
+    "run_id": "202610261603292365",
+    "with_history": "false"
+  },
+  "duracion_total_s": 0.8,
+  "duracion_carga_s": 0.8,
+  "ordenes_ok": 0,
+  "ordenes_error": 0,
+  "ordenes_por_s_media": 0.0,
+  "ordenes_por_s_max_bin": 0,
+  "peticiones_totales": 25,
+  "errores_totales": 0,
+  "errores_esperados_validados": 0,
+  "hilos_max": 0,
+  "latencia_ms": {
+    "p50": NaN,
+    "p90": NaN,
+    "p95": NaN,
+    "p99": NaN,
+    "p99.9": NaN,
+    "max": null,
+    "media": null
+  },
+  "errores_por_tipo": [],
+  "tiene_prometheus": false
+}

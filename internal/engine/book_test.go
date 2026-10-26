@@ -290,3 +290,93 @@ func TestDepthWithManyLevelsIsOrderedAndFast(t *testing.T) {
 		}
 	}
 }
+
+// levelQtyMatchesOrders recalcula, orden por orden, la cantidad pendiente de cada nivel y la compara con la que mantiene el libro
+// de forma incremental (level.qty). Es la comprobación independiente de que Depth devuelve lo mismo que antes del cambio.
+func levelQtyMatchesOrders(b *Book) error {
+	for _, h := range []*halfBook{b.bids, b.asks} {
+		for _, l := range h.heap.levels {
+			var sum domain.Qty
+			for e := l.orders.Front(); e != nil; e = e.Next() {
+				sum += e.Value.(*domain.Order).Remaining()
+			}
+			if sum != l.qty {
+				return fmt.Errorf("nivel %d: qty incremental=%d, recalculada=%d", l.price, l.qty, sum)
+			}
+		}
+	}
+	return nil
+}
+
+// Con ejecuciones parciales, completas, cancelaciones, remanentes truncados y restauración desde un snapshot, la cantidad por nivel
+// mantenida incrementalmente debe coincidir SIEMPRE con la suma real (y, por tanto, Depth con lo que devolvía el recorrido antiguo).
+func TestLevelQtyStaysConsistentAcrossFillsCancelsAndRestore(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	b := NewBook()
+	for i := 0; i < 30000; i++ {
+		side := domain.Buy
+		if rng.Intn(2) == 0 {
+			side = domain.Sell
+		}
+		mustSubmit(t, b, ord(fmt.Sprintf("o%d", i), "u", side, domain.Price(95+rng.Intn(11)), domain.Qty(1+rng.Intn(40))))
+		if rng.Intn(6) == 0 && i > 0 {
+			_, _ = b.Cancel(fmt.Sprintf("o%d", rng.Intn(i)))
+		}
+		if i%500 == 0 {
+			if err := levelQtyMatchesOrders(b); err != nil {
+				t.Fatalf("tras %d órdenes: %v", i, err)
+			}
+		}
+	}
+	if err := levelQtyMatchesOrders(b); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := RestoreBook(b.Capture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := levelQtyMatchesOrders(restored); err != nil {
+		t.Fatalf("libro restaurado: %v", err)
+	}
+	for _, side := range []domain.Side{domain.Buy, domain.Sell} {
+		x, y := b.Depth(side, 100), restored.Depth(side, 100)
+		if fmt.Sprint(x) != fmt.Sprint(y) {
+			t.Fatalf("Depth difiere tras restaurar (%v): %v vs %v", side, x, y)
+		}
+	}
+}
+
+// Regresión del hallazgo del perfil de CPU de la corrida de 30 min: Depth recorría todas las órdenes de los niveles consultados DENTRO
+// del secuenciador, así que su costo crecía con las órdenes en espera (18 % de la CPU a los 12 min con 1 % de lecturas del libro).
+// Ahora no debe depender de cuántas órdenes haya por nivel: mismos 100 niveles con 50 vs 5.000 órdenes cada uno.
+func TestDepthCostDoesNotGrowWithOrdersPerLevel(t *testing.T) {
+	build := func(perLevel int) *Book {
+		b := NewBook()
+		n := 0
+		for lvl := 0; lvl < 100; lvl++ {
+			for k := 0; k < perLevel; k++ {
+				n++
+				mustSubmit(t, b, ord(fmt.Sprintf("b%d", n), "u", domain.Buy, domain.Price(1000-lvl), 3))
+			}
+		}
+		return b
+	}
+	measure := func(b *Book) time.Duration {
+		best := time.Hour
+		for rep := 0; rep < 5; rep++ {
+			t0 := time.Now()
+			for i := 0; i < 200; i++ {
+				_ = b.Depth(domain.Buy, 5)
+			}
+			if d := time.Since(t0); d < best {
+				best = d
+			}
+		}
+		return best
+	}
+	small, big := measure(build(50)), measure(build(5000))
+	t.Logf("200 consultas de Depth(5): 50 órdenes/nivel = %v, 5.000 órdenes/nivel = %v (×%.1f)", small, big, float64(big)/float64(small))
+	if big > 4*small+5*time.Millisecond {
+		t.Fatalf("Depth cuesta %v con 5.000 órdenes por nivel vs %v con 50: no debe depender de la cantidad de órdenes", big, small)
+	}
+}

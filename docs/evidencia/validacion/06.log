@@ -1,0 +1,17 @@
+>> 1) carga con JMeter (humo)
+  resumen: 14408 órdenes ok, 0 con error, 482.1/s media; p50=1.0 p95=4.0 p99=11.0 ms; errores totales (todas las etiquetas)=0
+>> terminado (rc JMeter=0) en jmeter/results/20261026-160657-humo-recuperacion-carga
+>> 2) foto antes de la caída
+{"error":"","ok":true,"total_brl":10000015542000,"total_vib":10000000100}
+  [OK]    auditoría ok antes de la caída
+>> 3) SIGKILL a la app y reinicio
+   volvió en .2254 s (contado desde el reinicio, sin el segundo de espera tras el SIGKILL)
+  [OK]    el proceso se reinició de verdad (StartedAt cambió: 2026-10-26T16:06:40.625193437Z -> 2026-10-26T16:07:43.813795206Z)
+   {"time":"2026-10-26T16:07:44.062555927Z","level":"INFO","msg":"recuperación completa","path":"/data/journal.log","desde_snapshot":false,"snapshot_seq":0,"registros_reproducidos":14769,"last_seq":14769,"truncated_bytes":0,"took":"111.051889ms"}
+>> 4) comparación
+{"error":"","ok":true,"total_brl":10000015542000,"total_vib":10000000100}
+  [OK]    totales y saldos de 5 usuarios IDÉNTICOS tras la caída
+>> 5) integridad financiera sobre el sistema recuperado
+  resumen: 0 órdenes ok, 0 con error, 0.0/s media; p50=nan p95=nan p99=nan ms; errores totales (todas las etiquetas)=0
+  [OK]    plan de integridad sin errores
+RECUPERACIÓN VERIFICADA

@@ -1,0 +1,12 @@
+escenario=sostenida
+plan=jmeter/vibranium-load.jmx
+host=172.19.0.3
+port=8080
+protocol=http
+threads=128
+rampup_s=30
+duration_s=600
+tps_objetivo=5000
+users=100
+run_id=20261026133347435c
+with_history=false

@@ -1,0 +1,12 @@
+escenario=integridad
+plan=jmeter/vibranium-integrity.jmx
+host=172.19.0.3
+port=8080
+protocol=http
+threads=1
+rampup_s=0
+duration_s=0
+tps_objetivo=0
+users=100
+run_id=202610261548475d76
+with_history=false

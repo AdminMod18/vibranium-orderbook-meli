@@ -1,0 +1,53 @@
+{
+  "meta": {
+    "escenario": "estres",
+    "label": "despues-estres-pg",
+    "run_id": "202610261404036940",
+    "inicio_epoch": 1793023443,
+    "fin_epoch": 1793023749,
+    "jmeter_rc": 0,
+    "commit": "4f2ed7c",
+    "rama": "claude/focused-babbage-2ppmql",
+    "jmeter": "5.6.3",
+    "java": "openjdk version 21.0.12.1 2026-08-18",
+    "cpu_nucleos": 4,
+    "memoria_mb": 16091,
+    "disco_libre_gb_al_terminar": "4",
+    "fecha_utc": "2026-10-26T14:09:10Z"
+  },
+  "params": {
+    "escenario": "estres",
+    "plan": "jmeter/vibranium-load.jmx",
+    "host": "172.19.0.3",
+    "port": "8080",
+    "protocol": "http",
+    "threads": "256",
+    "rampup_s": "60",
+    "duration_s": "300",
+    "tps_objetivo": "0",
+    "users": "100",
+    "run_id": "202610261404036940",
+    "with_history": "false"
+  },
+  "duracion_total_s": 301.7,
+  "duracion_carga_s": 300.6,
+  "ordenes_ok": 1345820,
+  "ordenes_error": 0,
+  "ordenes_por_s_media": 4477.6,
+  "ordenes_por_s_max_bin": 5150.0,
+  "peticiones_totales": 1444340,
+  "errores_totales": 0,
+  "errores_esperados_validados": 6056,
+  "hilos_max": 256,
+  "latencia_ms": {
+    "p50": 7.0,
+    "p90": 24.0,
+    "p95": 34.0,
+    "p99": 58.0,
+    "p99.9": 131.0,
+    "max": 267.0,
+    "media": 11.0
+  },
+  "errores_por_tipo": [],
+  "tiene_prometheus": true
+}

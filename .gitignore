@@ -4,3 +4,6 @@
 .vscode/
 bin/
 data/
+# JMeter: el .jtl crudo pesa ~60 B por muestra (cientos de MB en 30 min); se conservan los CSV resumidos
+jmeter/results/**/results.jtl
+jmeter/results/**/ABORTADA_POR_DISCO.txt
