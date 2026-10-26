@@ -15,6 +15,7 @@ import (
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/domain"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/engine"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/exchange"
+	"github.com/AdminMod18/vibranium-orderbook-meli/internal/history"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/sequencer"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/wallet"
 )
@@ -24,11 +25,25 @@ const (
 	maxBodyBytes   = 1 << 20
 )
 
+// History es la fuente de las consultas históricas (Postgres). Es opcional: sin ella los
+// endpoints de historial responden 501 y el resto del sistema funciona igual.
+type History interface {
+	GetOrder(ctx context.Context, id string) (history.Order, []history.Trade, uint64, error)
+	ListOrders(ctx context.Context, user, status string, limit int) ([]history.Order, error)
+	ListTrades(ctx context.Context, user string, limit int) ([]history.Trade, error)
+	BalanceFromHistory(ctx context.Context, user string) (brl, vib int64, err error)
+	LastSeq(ctx context.Context) (uint64, error)
+}
+
 type API struct {
-	seq *sequencer.Sequencer
+	seq  *sequencer.Sequencer
+	hist History
 }
 
 func New(seq *sequencer.Sequencer) *API { return &API{seq: seq} }
+
+// WithHistory habilita los endpoints de consulta histórica.
+func (a *API) WithHistory(h History) *API { a.hist = h; return a }
 
 // Handler registra las rutas (patrones de método+ruta de Go 1.22).
 func (a *API) Handler() http.Handler {
@@ -39,6 +54,10 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /deposits", a.deposit)
 	mux.HandleFunc("GET /book", a.book)
 	mux.HandleFunc("GET /audit", a.audit)
+	mux.HandleFunc("GET /orders/{id}", a.getOrder)
+	mux.HandleFunc("GET /orders", a.listOrders)
+	mux.HandleFunc("GET /trades", a.listTrades)
+	mux.HandleFunc("GET /audit/history/{user}", a.auditHistory)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
@@ -229,6 +248,113 @@ func (a *API) audit(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, status, map[string]any{"ok": rep.OK, "error": rep.Error,
 		"total_brl": rep.TotalBRL, "total_vib": rep.TotalVIB})
+}
+
+// --- Historial (Postgres): lecturas fuera del camino del matching, eventualmente consistentes ---
+
+func (a *API) historyCtx(w http.ResponseWriter, r *http.Request) (context.Context, context.CancelFunc, bool) {
+	if a.hist == nil {
+		writeError(w, http.StatusNotImplemented, "history_disabled", "historial deshabilitado (falta DATABASE_URL)")
+		return nil, nil, false
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	return ctx, cancel, true
+}
+
+func writeHistoryError(w http.ResponseWriter, err error) {
+	if errors.Is(err, history.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found",
+			"no encontrado; si la orden es muy reciente puede tardar unos ms en reflejarse en el historial")
+		return
+	}
+	// Postgres caído NO afecta al matching: solo estas consultas degradan.
+	writeError(w, http.StatusServiceUnavailable, "history_unavailable", "historial no disponible temporalmente")
+}
+
+func parseLimit(r *http.Request) int {
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n >= 1 && n <= 500 {
+		return n
+	}
+	return 50
+}
+
+func (a *API) getOrder(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel, ok := a.historyCtx(w, r)
+	if !ok {
+		return
+	}
+	defer cancel()
+	o, trades, asOf, err := a.hist.GetOrder(ctx, r.PathValue("id"))
+	if err != nil {
+		writeHistoryError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"order": o, "trades": trades, "as_of_seq": asOf})
+}
+
+func (a *API) listOrders(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel, ok := a.historyCtx(w, r)
+	if !ok {
+		return
+	}
+	defer cancel()
+	orders, err := a.hist.ListOrders(ctx, r.URL.Query().Get("user_id"), r.URL.Query().Get("status"), parseLimit(r))
+	if err != nil {
+		writeHistoryError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"orders": orders})
+}
+
+func (a *API) listTrades(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel, ok := a.historyCtx(w, r)
+	if !ok {
+		return
+	}
+	defer cancel()
+	trades, err := a.hist.ListTrades(ctx, r.URL.Query().Get("user_id"), parseLimit(r))
+	if err != nil {
+		writeHistoryError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"trades": trades})
+}
+
+// auditHistory contrasta el saldo del motor con el recalculado SOLO desde el historial
+// (depósitos + trades). Son iguales cuando el proyector está al día (lag = 0).
+func (a *API) auditHistory(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel, ok := a.historyCtx(w, r)
+	if !ok {
+		return
+	}
+	defer cancel()
+	user := r.PathValue("user")
+	acc, err := a.seq.Balance(ctx, user)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	jseq := a.seq.JournalSeq()
+	hbrl, hvib, err := a.hist.BalanceFromHistory(ctx, user)
+	if err != nil && !errors.Is(err, history.ErrNotFound) {
+		writeHistoryError(w, err)
+		return
+	}
+	projected, err := a.hist.LastSeq(ctx)
+	if err != nil {
+		writeHistoryError(w, err)
+		return
+	}
+	ebrl, evib := acc.BRLFree+acc.BRLHeld, acc.VIBFree+acc.VIBHeld
+	lag := int64(jseq) - int64(projected)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user_id": user, "journal_seq": jseq, "projected_seq": projected, "lag": lag,
+		"engine":  map[string]int64{"brl_total": ebrl, "vib_total": evib},
+		"history": map[string]int64{"brl_total": hbrl, "vib_total": hvib},
+		// solo es concluyente con lag = 0
+		"consistent": hbrl == ebrl && hvib == evib,
+		"conclusive": lag == 0,
+	})
 }
 
 // --- Utilidades ---

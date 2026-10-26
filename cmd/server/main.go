@@ -13,6 +13,7 @@ import (
 
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/api"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/exchange"
+	"github.com/AdminMod18/vibranium-orderbook-meli/internal/history"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/journal"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/sequencer"
 )
@@ -54,9 +55,31 @@ func main() {
 		"truncated_bytes", stats.TruncatedBytes, "took", time.Since(t0).String())
 
 	seq := sequencer.New(ex, queueSize, sequencer.WithJournal(jr))
+
+	// Historial en Postgres (opcional). El servidor arranca y opera aunque Postgres esté caído:
+	// el proyector reintenta en segundo plano y se pone al día solo.
+	handler := api.New(seq)
+	projCtx, stopProj := context.WithCancel(context.Background())
+	projDone := make(chan struct{})
+	var proj *history.Projector
+	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+		st, err := history.Open(projCtx, dsn)
+		if err != nil {
+			log.Error("DATABASE_URL inválida", "err", err)
+			os.Exit(1)
+		}
+		defer st.Close()
+		handler = handler.WithHistory(st)
+		proj = history.NewProjector(st, journalPath, log)
+		go func() { proj.Run(projCtx); close(projDone) }()
+		log.Info("historial en Postgres habilitado")
+	} else {
+		close(projDone)
+		log.Warn("DATABASE_URL no definida: sin historial consultable (el journal igual registra todo)")
+	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.New(seq).Handler(),
+		Handler:           handler.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      35 * time.Second,
@@ -86,5 +109,13 @@ func main() {
 	if err := jr.Close(); err != nil {
 		log.Error("cerrando journal", "err", err)
 	}
+	// Se da un margen al proyector para reflejar los últimos registros antes de salir.
+	if proj != nil {
+		for end := time.Now().Add(3 * time.Second); proj.ProjectedSeq() < jr.LastSeq() && time.Now().Before(end); {
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	stopProj()
+	<-projDone
 	log.Info("apagado completo")
 }

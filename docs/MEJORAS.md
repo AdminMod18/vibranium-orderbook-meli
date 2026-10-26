@@ -11,9 +11,9 @@ Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 | 🔴 | ¿Qué pasa si se cae el secuenciador? | Reinicio + replay del journal (ms). Probado con `kill -9`. Mientras reinicia hay indisponibilidad (no se pierde nada confirmado) | **Hot standby**: segunda instancia consumiendo el mismo log, promovida por *leader election* ⇒ RTO de segundos |
 | 🔴 | ¿Y si se pierde el disco? | Se pierde el journal (L6) | Volumen replicado (EBS multi-AZ / réplica síncrona) o mover el log a **Kafka/Redpanda** con replicación (`acks=all`) |
 | 🔴 | ¿Qué pasa si dos instancias arrancan a la vez? | Corrompen el journal (L7) | Lock de archivo (`flock`) como mínimo; en producción *lease* en etcd/Consul (fencing token) |
-| 🟠 | ¿Qué pasa si Postgres cae? | (Fase 4b) El matching sigue: Postgres es solo lectura/historial y se reconstruye desde el journal | Alertar por *lag* del proyector |
+| 🟠 | ¿Qué pasa si Postgres cae? | **Probado** (`drill-postgres-down.sh`): el matching sigue, historial `503`, se reconcilia solo al volver | Alertar por *lag* del proyector (Fase 5) |
 | 🟠 | ¿Cómo se recupera con mucho histórico? | Replay completo (~1-3 s por millón de registros) | **Snapshots** periódicos (libro + saldos + contadores + ids vistos) + rotación de segmentos; arrancar desde el último snapshot |
-| 🟠 | ¿Y si el cliente reintenta tras un timeout? | `409` por id repetido (L2) | `GET /orders/{id}` (Fase 4b) y/o devolver el resultado original en el reintento idempotente |
+| 🟠 | ¿Y si el cliente reintenta tras un timeout? | `409`, y `GET /orders/{id}` permite consultar el estado | Devolver el resultado original en el reintento idempotente (guardar el resultado por `order_id`) |
 | 🟢 | ¿Qué pasa si el proceso recibe SIGTERM? | Apagado ordenado: drena requests y cola, cierra el journal | — |
 
 ## Escala
@@ -35,6 +35,13 @@ Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 | 🟠 | ¿Órdenes market / IOC / FOK? | Solo límite (D1) | Se montan sobre el mismo `match()` |
 | 🟠 | ¿Comisiones? | No (D20) | Tercera pata en `Settle` |
 | 🟢 | ¿Retiros / depósitos reales? | `POST /deposits` solo para pruebas | Servicio de wallets real con saga e idempotencia |
+
+## Historial
+| Pri | Pregunta | Respuesta hoy | Siguiente paso |
+|---|---|---|---|
+| 🟠 | ¿Cómo se reconstruye el historial? | Vaciar tablas y reiniciar: el proyector relee el journal | Rotación de segmentos + índice para no releer todo (L9) |
+| 🟠 | ¿Escala el proyector? | Un lote de hasta 5.000 registros por transacción con pipeline | Particionar por tiempo; COPY para cargas masivas; consumidor Kafka |
+| 🟢 | ¿Dos proyectores? | No soportado (D41) | *Advisory lock* de Postgres para elegir líder |
 
 ## Observabilidad (Fase 5)
 | Pri | Pregunta | Plan |

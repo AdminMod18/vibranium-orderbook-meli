@@ -58,6 +58,19 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 | D32 | Al reproducir se **verifica que cada orden dé los mismos trades** que registró (`ErrDiverged`) | Detecta no-determinismo o un bug de versión al instante, en vez de corromper saldos | — | ✅ |
 | D33 | Recuperación **completa desde el inicio** del log (sin snapshots) en el MVP | Medido: 700 registros en ~6 ms (≈1-3 s por millón). Snapshots son una optimización con complejidad propia | Snapshot + rotación de segmentos: ver `MEJORAS.md` | 🟡 |
 
+## Historial y trazabilidad (Fase 4b)
+
+| # | Decisión | Por qué | Alternativas / costo | Estado |
+|---|---|---|---|---|
+| D34 | **Postgres como *read model*** alimentado por un **proyector** que lee el journal; fuera del camino del matching | Trazabilidad consultable (SQL, índices) sin frenar el motor. Si Postgres cae, el matching sigue (probado). Si se pierde, se reconstruye leyendo el journal | Escribir en Postgres desde el secuenciador: cada orden pagaría la latencia de la DB y un fallo de la DB tumbaría el mercado | ✅ |
+| D35 | Cada lote se aplica en **una transacción junto con `last_seq`** | Efecto *exactly-once*: tras un fallo se reintenta el mismo lote sin duplicar ni perder | Idempotencia solo por `ON CONFLICT`: no cubre los UPDATE de los makers | ✅ |
+| D36 | El proyector lee el **archivo** del journal (no un canal en memoria) | Desacoplado: puede correr en otro proceso o reemplazarse por un consumidor de Kafka sin tocar el motor. Retoma tras reinicios | Canal en memoria: más rápido, pero se pierde en cada caída y acopla ambos | ✅ |
+| D37 | **Consistencia eventual** del historial; las respuestas incluyen `as_of_seq` | Es el costo de desacoplar. `lag = journal_seq − projected_seq` mide cuánto atrasa | Lecturas fuertes desde el motor: compiten con el matching | ✅ |
+| D38 | **Identidad del journal** (registro `genesis` con UUID) y el historial se **ata** a ella | Descubierta con un drill real: un Postgres viejo + un journal nuevo hacía que el proyector se saltara registros en silencio. Ahora se niega a proyectar y avisa | Confiar en `last_seq` solo: no detecta que historial y journal son de historias distintas | ✅ |
+| D39 | **Prueba de trazabilidad**: vista SQL `balances_from_history` recalcula el saldo de cada usuario solo con depósitos + trades; `GET /audit/history/{user}` lo contrasta con el motor | Demuestra que el historial explica *cada* centavo y *cada* unidad | — | ✅ |
+| D40 | El servidor **arranca aunque Postgres no esté listo** (por eso `depends_on` sin `service_healthy`) | El mercado no debe depender del historial; el proyector reintenta con backoff exponencial | Esperar a Postgres: acopla disponibilidad del mercado a la del historial | ✅ |
+| D41 | Un único proyector escribiendo por historial | Dos proyectores sobre el mismo Postgres se pisarían | *Leader election* / advisory lock si se escalara | 🟡 (L7) |
+
 ## Plataforma
 
 | # | Decisión | Por qué | Estado |
@@ -72,7 +85,7 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 - ~~**L1 — Estado en memoria.**~~ Resuelta en Fase 4a: journal + recuperación (probado con `scripts/drill-kill9.sh`). Queda la limitación de disco único: ver L6.
 - **L6 — El journal vive en UN disco.** Si se pierde el volumen se pierde el log. Mitigación de producción: volumen replicado / réplica en espera / Kafka con replicación (ver `MEJORAS.md`).
 - **L7 — No hay candado de proceso único.** Dos instancias escribiendo el mismo journal lo corromperían. En Docker se corre una; en producción hay que usar *leader election* o un lock de archivo (ver `MEJORAS.md`).
-- **L2 — Reintento tras timeout.** Si el cliente corta la conexión después de que la orden entró a la cola, la orden *sí* se procesa pero el cliente no ve el resultado; al reintentar recibe `409`. Mitigación prevista: `GET /orders/{id}` para consultar el estado (Fase 4, requiere historial).
+- **L2 — Reintento tras timeout.** Si el cliente corta la conexión después de que la orden entró a la cola, la orden *sí* se procesa pero el cliente no ve el resultado; al reintentar recibe `409`. **Mitigado en 4b**: `GET /orders/{id}` consulta el estado (eventualmente consistente: una orden muy reciente puede tardar unos ms en aparecer). Mejora pendiente: devolver el resultado original en el reintento idempotente.
 - **L3 — Un solo secuenciador = un solo punto de falla del mercado.** Mitigación: recuperación rápida desde snapshot+log; en producción, réplica en espera (*hot standby*) consumiendo el mismo log.
 - **L4 — Un instrumento.** El diseño ya separa por mercado, pero el MVP solo expone Vibranium/BRL.
 - **L5 — `Depth()` recorre el libro.** Es para consulta/observabilidad, no para el camino caliente.
@@ -85,3 +98,6 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 4. ¿Cómo prefieren sembrar saldos para su prueba? (hoy: `POST /deposits`)
 5. ¿La respuesta de la API debe ser síncrona (resultado inmediato) o aceptan `202`?
 6. ¿Cobran comisiones en el MVP?
+
+- **L8 — La etapa de *build* del `Dockerfile` no se pudo ejecutar en el entorno de desarrollo** (los contenedores de build no tenían salida a internet para `go mod download`). Sí se verificó con **Docker real**: la topología completa del compose (Postgres + app, red, volúmenes, healthchecks, política de reinicio) usando un binario compilado en el host con la misma etapa de runtime; el binario estático compila. Antes de la presentación, correr `docker compose up --build` en una máquina con internet.
+- **L9 — El proyector relee el journal desde el inicio al arrancar** (salta lo ya reflejado). Es O(tamaño del log); con segmentos rotados + índice sería O(1). Ver `MEJORAS.md`.

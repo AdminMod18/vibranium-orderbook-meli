@@ -35,16 +35,19 @@ func TestRoundTripAndContinue(t *testing.T) {
 	write(t, path, 100)
 
 	j, st, got, err := recoverAll(t, path)
-	if err != nil || st.Records != 100 || st.LastSeq != 100 || st.TruncatedBytes != 0 {
+	if err != nil || st.Records != 101 || st.LastSeq != 101 || st.TruncatedBytes != 0 { // 100 + genesis
 		t.Fatalf("recover: %+v %v", st, err)
 	}
-	for i, r := range got {
-		if r.Seq != uint64(i+1) || r.BRL != int64(i+1) {
+	if got[0].Kind != KindGenesis || got[0].JournalID == "" {
+		t.Fatalf("el primer registro debe ser genesis: %+v", got[0])
+	}
+	for i, r := range got[1:] {
+		if r.Seq != uint64(i+2) || r.BRL != int64(i+1) {
 			t.Fatalf("registro %d fuera de orden: %+v", i, r)
 		}
 	}
-	if err := j.Append(NewDepositRecord("u", 1, 0)); err != nil || j.NextSeq() != 102 {
-		t.Fatalf("la secuencia debe continuar en 101: next=%d err=%v", j.NextSeq(), err)
+	if err := j.Append(NewDepositRecord("u", 1, 0)); err != nil || j.NextSeq() != 103 {
+		t.Fatalf("la secuencia debe continuar en 102: next=%d err=%v", j.NextSeq(), err)
 	}
 	j.Close()
 }
@@ -59,8 +62,8 @@ func TestTornTailIsDiscardedAndWritingResumes(t *testing.T) {
 		}
 
 		j, st, got, err := recoverAll(t, path)
-		if err != nil || len(got) != 9 || st.TruncatedBytes == 0 {
-			t.Fatalf("corte %d: esperaba 9 registros y cola descartada: %+v %v", cut, st, err)
+		if err != nil || len(got) != 10 || st.TruncatedBytes == 0 { // genesis + 9
+			t.Fatalf("corte %d: esperaba 10 registros y cola descartada: %+v %v", cut, st, err)
 		}
 		if err := j.Append(NewDepositRecord("u", 99, 0)); err != nil {
 			t.Fatal(err)
@@ -68,8 +71,8 @@ func TestTornTailIsDiscardedAndWritingResumes(t *testing.T) {
 		j.Close()
 
 		_, st2, got2, err := recoverAll(t, path)
-		if err != nil || len(got2) != 10 || got2[9].BRL != 99 || st2.TruncatedBytes != 0 {
-			t.Fatalf("corte %d: tras reanudar debe haber 10 registros limpios: %+v %v", cut, st2, err)
+		if err != nil || len(got2) != 11 || got2[10].BRL != 99 || st2.TruncatedBytes != 0 {
+			t.Fatalf("corte %d: tras reanudar debe haber 11 registros limpios: %+v %v", cut, st2, err)
 		}
 	}
 }
@@ -82,7 +85,7 @@ func TestBadCRCOnLastRecordIsTornTail(t *testing.T) {
 	os.WriteFile(path, b, 0o644)
 
 	_, _, got, err := recoverAll(t, path)
-	if err != nil || len(got) != 4 {
+	if err != nil || len(got) != 5 { // genesis + 4
 		t.Fatalf("got %d registros, err %v", len(got), err)
 	}
 }
@@ -109,14 +112,14 @@ func TestReaderTailsIncrementally(t *testing.T) {
 	defer rd.Close()
 
 	count := func() int {
-		n, err := rd.ReadNew(func(Record) error { return nil })
+		n, err := rd.ReadNew(0, func(Record) error { return nil })
 		if err != nil {
 			t.Fatal(err)
 		}
 		return n
 	}
-	if count() != 0 {
-		t.Fatal("log vacío")
+	if count() != 1 {
+		t.Fatal("un journal nuevo contiene solo el registro genesis")
 	}
 	for i := 0; i < 3; i++ {
 		j.Append(NewDepositRecord("u", 1, 0))

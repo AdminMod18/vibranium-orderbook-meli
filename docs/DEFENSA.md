@@ -148,5 +148,46 @@ Ninguna orden aceptada se pierde por un deploy.
 - *¿`fsync` por lote no retrasa?* Los comandos del lote esperan unos ms, pero el throughput sube órdenes de magnitud; la latencia es la de un fsync, no la de N.
 - *¿Cuánto tarda recuperar con mucho histórico?* Lineal en el tamaño del log (~1-3 s por millón de registros). Con snapshots + rotación sería constante; está en el backlog por ser una optimización.
 
+## Fase 4b — Historial y trazabilidad (`internal/history`)
+
+### Arquitectura
+```
+ journal (fuente de verdad, fsync) ──► Proyector (lee el archivo, aplica lotes en 1 transacción) ──► Postgres
+                                                                                                   │
+                         GET /orders/{id} · /orders · /trades · /audit/history/{user} ◄────────────┘
+```
+- **El mercado no depende de Postgres.** Probado: con Postgres caído el matching siguió y el historial respondió `503`; al volver se puso al día solo (`scripts/drill-postgres-down.sh`).
+- **Exactly-once efectivo**: lote + `last_seq` en una transacción. Reiniciar el proyector (probado) no duplica ni pierde.
+- **Trazabilidad demostrable**: `balances_from_history` (depósitos + trades) == billetera del motor, para todos los usuarios (test de integración con 10.000 registros).
+- **Tablas**: `orders` (estado actual), `trades` (inmutable, append-only), `deposits`, `projector_state`.
+
+### Verificado con Docker real
+| Prueba | Resultado |
+|---|---|
+| `docker compose up`: Postgres + app, ambos `healthy` | ✅ la app arrancó **antes** que Postgres, reintentó y se conectó sola (D40) |
+| Crash real: `kill -9` al proceso de la app con carga (`scripts/drill-docker-crash.sh`) | ✅ Docker la reinició (`RestartCount` sube), recuperó 189 registros en 1,5 ms, totales intactos |
+| `docker compose stop postgres` en pleno uso (`scripts/drill-postgres-down.sh`) | ✅ matching `201`, historial `503`; al volver, `lag=0` y consistente con el motor |
+| SIGTERM (apagado ordenado) | ✅ la app sale limpia (código 0) |
+
+**Detalle útil:** `docker kill` cuenta como parada *manual* y Docker **no** aplica la política de reinicio; para simular un fallo real se mata el *proceso* desde el host (lo que haría el OOM killer). Quien pruebe con `docker kill` verá que la app no vuelve y pensará que está mal: no lo está.
+
+### Una historia para contar (hallazgo real)
+Un drill falló: el Postgres conservaba `last_seq=10012` de otra corrida, el journal era nuevo y el proyector **se saltó en silencio** los primeros 10.012 registros. Lección: *un read model debe estar atado a la identidad de su fuente*. Solución: registro `genesis` con UUID en el journal y vínculo en `projector_state`; si no coinciden, el proyector se detiene, avisa en logs y se reporta no saludable. Quedó cubierto con un test.
+
+### Qué pasa si falla...
+| Falla | Efecto | Recuperación |
+|---|---|---|
+| Postgres caído | Historial `503`; **matching intacto** | Proyector reintenta con backoff (0,2 s → 5 s) y se pone al día |
+| Proyector reiniciado | Pausa del historial | Retoma desde `last_seq`, sin duplicados |
+| Postgres perdido por completo | Se pierde el historial, no el dinero | Se reconstruye leyendo el journal desde cero |
+| Postgres y journal de historias distintas | Riesgo de historial falso | `ErrJournalMismatch`: se niega a proyectar |
+| Lag alto del proyector | Consultas desactualizadas | Métrica de lag + alerta (Fase 5) |
+
+### Preguntas probables
+- *¿Por qué no escribir en Postgres desde el secuenciador?* Acopla la latencia y la disponibilidad del mercado a la DB, y obliga a transacciones por orden. Así el matching solo paga un fsync por lote.
+- *¿Y si el historial dice algo distinto al motor?* El motor manda (el journal es la verdad). `GET /audit/history/{user}` lo contrasta; con `lag=0` deben coincidir.
+- *¿Cómo escalaría el historial?* Particionar tablas por tiempo, réplicas de lectura, y/o sustituir el proyector por un consumidor de Kafka.
+- *¿Por qué eventualmente consistente?* Para desacoplar; la respuesta incluye `as_of_seq` y el lag es de milisegundos.
+
 ## Próximas fases
-4b. Historial en Postgres (proyector) + docker-compose · 5. Observabilidad · 6. Pruebas de carga y de fallos.
+5. Observabilidad (métricas Prometheus, logs, Grafana) · 6. Prueba de carga a 5.000+ órdenes/s y más drills de fallos.

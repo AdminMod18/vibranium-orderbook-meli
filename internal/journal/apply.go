@@ -55,6 +55,9 @@ func NewDepositRecord(user string, brl, vib int64) *Record {
 // Apply re-ejecuta un registro sobre el exchange y verifica que el resultado coincida.
 func Apply(x *exchange.Exchange, rec Record) error {
 	switch rec.Kind {
+	case KindGenesis:
+		return nil // solo identifica al journal; no cambia el estado
+
 	case KindDeposit:
 		return x.Deposit(rec.User, rec.BRL, rec.VIB)
 

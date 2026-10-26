@@ -146,6 +146,14 @@ func (s *Sequencer) Processed() uint64  { return s.processed.Load() }
 func (s *Sequencer) Overloaded() uint64 { return s.rejected.Load() }
 func (s *Sequencer) Batches() uint64    { return s.batches.Load() }
 
+// JournalSeq es el último registro confirmado en el journal (0 si no hay persistencia).
+func (s *Sequencer) JournalSeq() uint64 {
+	if s.jr == nil {
+		return 0
+	}
+	return s.jr.LastSeq()
+}
+
 // Do encola fn y espera su resultado. fn devuelve además el registro de journal a persistir
 // (nil si no cambia el estado). El encolado NO bloquea: con la cola llena devuelve
 // ErrOverloaded de inmediato (backpressure). Si ctx expira mientras se espera, el comando
