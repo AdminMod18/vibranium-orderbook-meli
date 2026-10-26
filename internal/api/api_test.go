@@ -103,3 +103,12 @@ func TestCancelFlow(t *testing.T) {
 		t.Fatalf("debe liberar la reserva: %v", bal)
 	}
 }
+
+func TestHistoryEndpointsReturn501WhenDisabled(t *testing.T) {
+	srv, _ := newServer(t, 100)
+	for _, path := range []string{"/orders/x", "/orders", "/trades", "/audit/history/alice"} {
+		if code, _ := call(t, srv, "GET", path, ""); code != http.StatusNotImplemented {
+			t.Errorf("%s: got %d want 501", path, code)
+		}
+	}
+}

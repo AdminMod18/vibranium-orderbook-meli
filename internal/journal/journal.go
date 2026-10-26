@@ -11,7 +11,9 @@ package journal
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,6 +42,9 @@ const (
 	KindDeposit Kind = "deposit"
 	KindOrder   Kind = "order"
 	KindCancel  Kind = "cancel"
+	// KindGenesis es el primer registro de todo journal nuevo: fija su identidad (JournalID).
+	// Ata el journal a su historial en Postgres: si alguno se reemplaza por otro, se detecta.
+	KindGenesis Kind = "genesis"
 )
 
 // OrderRec es la orden tal como se recibió (campos de entrada) más su estado final
@@ -80,6 +86,8 @@ type Record struct {
 	Order   *OrderRec  `json:"order,omitempty"`    // order, cancel (estado final)
 	Trades  []TradeRec `json:"trades,omitempty"`   // order
 	OrderID string     `json:"order_id,omitempty"` // cancel
+
+	JournalID string `json:"journal_id,omitempty"` // genesis
 }
 
 // Options configura el journal.
@@ -92,12 +100,15 @@ type Options struct {
 type Journal struct {
 	f      *os.File
 	w      *bufio.Writer
-	next   uint64
+	next   uint64 // solo lo toca el goroutine que escribe
 	opts   Options
-	bytes  int64
 	dirty  bool
-	syncs  uint64
 	closed bool
+
+	// Contadores legibles desde otras goroutines (métricas, API).
+	lastSeq atomic.Uint64
+	bytes   atomic.Int64
+	syncs   atomic.Uint64
 }
 
 // ReplayStats describe lo ocurrido al recuperar.
@@ -119,7 +130,7 @@ func Recover(path string, opts Options, fn func(Record) error) (*Journal, Replay
 	if err != nil {
 		return nil, ReplayStats{}, err
 	}
-	res, err := scan(f, 0, 0, fn)
+	res, err := scan(f, 0, 0, 0, fn)
 	if err != nil {
 		f.Close()
 		return nil, ReplayStats{}, err
@@ -146,7 +157,22 @@ func Recover(path string, opts Options, fn func(Record) error) (*Journal, Replay
 		f.Close()
 		return nil, stats, err
 	}
-	return &Journal{f: f, w: bufio.NewWriterSize(f, 1<<20), next: res.lastSeq + 1, opts: opts, bytes: res.end}, stats, nil
+	j := &Journal{f: f, w: bufio.NewWriterSize(f, 1<<20), next: res.lastSeq + 1, opts: opts}
+	j.lastSeq.Store(res.lastSeq)
+	j.bytes.Store(res.end)
+	if res.count == 0 && res.lastSeq == 0 { // journal nuevo: se le da identidad
+		id := make([]byte, 16)
+		_, _ = rand.Read(id)
+		if err := j.Append(&Record{Kind: KindGenesis, JournalID: hex.EncodeToString(id)}); err != nil {
+			f.Close()
+			return nil, stats, err
+		}
+		if err := j.Sync(); err != nil {
+			f.Close()
+			return nil, stats, err
+		}
+	}
+	return j, stats, nil
 }
 
 // Append agrega un registro al buffer (asigna Seq y TS). No es durable hasta llamar a Sync.
@@ -171,7 +197,8 @@ func (j *Journal) Append(rec *Record) error {
 		return err
 	}
 	j.next++
-	j.bytes += int64(headerSize + len(payload))
+	j.lastSeq.Store(rec.Seq)
+	j.bytes.Add(int64(headerSize + len(payload)))
 	j.dirty = true
 	return nil
 }
@@ -191,7 +218,7 @@ func (j *Journal) Sync() error {
 		}
 	}
 	j.dirty = false
-	j.syncs++
+	j.syncs.Add(1)
 	return nil
 }
 
@@ -208,9 +235,10 @@ func (j *Journal) Close() error {
 }
 
 // Métricas simples para observabilidad.
-func (j *Journal) NextSeq() uint64 { return j.next }
-func (j *Journal) Bytes() int64    { return j.bytes }
-func (j *Journal) Syncs() uint64   { return j.syncs }
+func (j *Journal) LastSeq() uint64 { return j.lastSeq.Load() }
+func (j *Journal) NextSeq() uint64 { return j.lastSeq.Load() + 1 }
+func (j *Journal) Bytes() int64    { return j.bytes.Load() }
+func (j *Journal) Syncs() uint64   { return j.syncs.Load() }
 
 // --- lectura ---
 
@@ -221,15 +249,16 @@ type scanResult struct {
 }
 
 // scan lee registros desde start. prevSeq es el seq esperado previo (0 = no verificar el primero).
+// limit > 0 corta tras ese número de registros (lectura por lotes).
 // Una cola incompleta (EOF a mitad de registro, o CRC malo en el ÚLTIMO registro) se tolera:
 // es el rastro de una caída durante la escritura. Cualquier otra anomalía es corrupción real.
-func scan(f *os.File, start int64, prevSeq uint64, fn func(Record) error) (scanResult, error) {
+func scan(f *os.File, start int64, prevSeq uint64, limit int, fn func(Record) error) (scanResult, error) {
 	if _, err := f.Seek(start, io.SeekStart); err != nil {
 		return scanResult{}, err
 	}
 	r := bufio.NewReaderSize(f, 1<<20)
 	res := scanResult{end: start, lastSeq: prevSeq}
-	for {
+	for limit <= 0 || res.count < limit {
 		var hdr [headerSize]byte
 		if _, err := io.ReadFull(r, hdr[:]); err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -269,6 +298,7 @@ func scan(f *os.File, start int64, prevSeq uint64, fn func(Record) error) (scanR
 		res.lastSeq = rec.Seq
 		res.count++
 	}
+	return res, nil
 }
 
 // Reader lee el log de forma incremental sin escribir: lo usará el proyector del historial.
@@ -286,9 +316,9 @@ func OpenReader(path string) (*Reader, error) {
 	return &Reader{f: f}, nil
 }
 
-// ReadNew entrega a fn los registros agregados desde la última llamada.
-func (r *Reader) ReadNew(fn func(Record) error) (int, error) {
-	res, err := scan(r.f, r.offset, r.lastSeq, fn)
+// ReadNew entrega a fn hasta limit registros (0 = todos) agregados desde la última llamada.
+func (r *Reader) ReadNew(limit int, fn func(Record) error) (int, error) {
+	res, err := scan(r.f, r.offset, r.lastSeq, limit, fn)
 	if err != nil {
 		return res.count, err
 	}
