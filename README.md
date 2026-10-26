@@ -14,6 +14,9 @@ curl localhost:8080/healthz
 ./scripts/demo.sh                # guion interactivo para la presentación
 ```
 
+> **Plataforma (Kubernetes):** el despliegue como código (kind, ingress, observabilidad, pruebas de caos) vive en el repo
+> `vibranium-orderbook-infra`. Este repo publica la imagen en GHCR (`.github/workflows/image.yml`) y su CI la prueba allí.
+
 | | |
 |---|---|
 | API | http://localhost:8080 |
