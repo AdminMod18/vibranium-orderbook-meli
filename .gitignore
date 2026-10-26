@@ -1,5 +1,6 @@
-bin/
 *.out
+.env
 .idea/
 .vscode/
+bin/
 data/

@@ -7,7 +7,7 @@ Objetivo del evaluador: *"Para nosotros es más importante entender cómo llegas
 - [ ] Fusionar la rama `claude/focused-babbage-2ppmql` a `main` (o presentar desde esa rama, pero que se sepa cuál es).
 - [ ] En una carpeta nueva: `git clone` del repo → `./scripts/preflight.sh` → `docker compose up --build -d` → `./scripts/smoke.sh`. *(Esto prueba exactamente lo que probarán ellos.)*
 - [ ] `./scripts/verify-all.sh` en verde en TU máquina (los números del informe son de otra; aquí se confirman los tuyos).
-- [ ] Docker Desktop abierto, puertos 8080/3000/9090/5432 libres, internet disponible.
+- [ ] Docker Desktop abierto, internet disponible y puertos libres (`./scripts/preflight.sh` lo comprueba; si alguno está ocupado, `cp .env.example .env` y cambia ese número).
 - [ ] Antes de la demo: `docker compose down -v && docker compose up -d` (**libro vacío**; tras pruebas de carga el guion no cruza igual).
 - [ ] Abrir en pestañas: Grafana http://localhost:3000, Prometheus http://localhost:9090/alerts, el repo en GitHub.
 - [ ] Plan B si Docker falla: `go run ./cmd/server` (sin Postgres) y mostrar el resto; los tests y los informes siguen siendo evidencia.

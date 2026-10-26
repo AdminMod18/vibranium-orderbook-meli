@@ -8,7 +8,8 @@
 # Variables: COMPOSE_ARGS (p. ej. "-f docker-compose.yml -f override.yml"), API (por defecto localhost:8080).
 cd "$(dirname "$0")/.."
 COMPOSE="docker compose ${COMPOSE_ARGS:-}"
-A=${API:-localhost:8080}
+[ -f .env ] && { set -a; . ./.env; set +a; }   # puertos personalizados (ver .env.example)
+A=${API:-localhost:${API_PORT:-8080}}
 NAMES=(); RES=(); DUR=(); FAIL=0
 HAVE_GO=0; command -v go >/dev/null 2>&1 && [ "${SKIP_GO:-0}" != 1 ] && HAVE_GO=1
 

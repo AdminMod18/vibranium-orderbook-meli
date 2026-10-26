@@ -5,7 +5,8 @@
 # Requiere el stack arriba:  docker compose up -d
 set -uo pipefail
 cd "$(dirname "$0")/.."
-A=${API:-localhost:8080}
+[ -f .env ] && { set -a; . ./.env; set +a; }   # puertos personalizados (ver .env.example)
+A=${API:-localhost:${API_PORT:-8080}}
 COMPOSE="docker compose ${COMPOSE_ARGS:-}"
 R=$(date +%s)$RANDOM; AL=alice-$R; BO=bob-$R
 B=$'\033[1m'; D=$'\033[2m'; C=$'\033[36m'; G=$'\033[32m'; N=$'\033[0m'

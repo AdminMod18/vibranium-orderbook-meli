@@ -60,12 +60,13 @@ Cada ítem es un defecto o una creencia errónea que **una prueba descubrió** y
 6. **Los drills fallaban en silencio** tras renombrar un mensaje de log (`grep` + `set -e`). Motivó `verify-all.sh`, que informa cada paso.
 7. **Un drill intermitente** (3 de 6 fallos con la máquina cargada): el servidor escribía su snapshot final al apagarse mientras el script borraba el directorio. *Corregido* esperando al proceso antes de limpiar; **10/10 y 4/4** después.
 8. **La idempotencia crecía sin límite** (≈430 M ids/día a 5.000/s). *Corregido* con una ventana (D57-D60). Al probarla aparecieron dos sutilezas: (a) un id olvidado cuya orden sigue en el libro llegaba al libro, que lo rechazaba con *otro* error (habría sido un 500), ahora se traduce a 409 sin dejar reservas colgadas; (b) **cambiar el tamaño de la ventana entre reinicios habría impedido arrancar** (`la reproducción divergió`): lo demostró una prueba de mutación y se evita no comprobando la ventana al reproducir el journal.
+10. **Un puerto ocupado en la máquina real impedía arrancar** (`Bind for 0.0.0.0:5432 failed`): un PostgreSQL de Windows usaba el 5432. Solo salió al probar en un equipo ajeno al de desarrollo. *Corregido* con puertos configurables (`.env`) y un `preflight` que lo detecta y explica la salida; reproducido y verificado ocupando el puerto a propósito.
 9. **La demo y el smoke exigen un libro vacío** (si no, los cruces no son los esperados tras una prueba de carga): ahora lo comprueban, avisan cómo reiniciar y se limpian solos.
 
 ## 5. Limitaciones (lo que NO se probó o no es válido)
 
 - **Windows/Git Bash y Docker Desktop no se pudieron probar** (el desarrollo se hizo en Linux). Los scripts contemplan `.exe`, CRLF y PIDs ajenos, pero requieren que se ejecute `./scripts/preflight.sh` allí.
-- **El `Dockerfile` completo no se ejecutó de punta a punta** aquí (los contenedores de build no tenían salida a internet). Se verificó la compilación dentro de `golang:1.24` y el resto de la imagen por separado. Correr `docker compose up --build` en una máquina con internet.
+- ~~El `Dockerfile` completo no se ejecutó de punta a punta en el entorno de desarrollo~~ → **verificado en una máquina Windows con Docker Desktop**: el build completo termina bien. (En el entorno de desarrollo se probó por partes.)
 - **Una sola instancia y un solo disco**: no hay réplica en espera (L3, L6); un fallo del disco pierde el journal.
 - **El journal crece sin rotación** (L13 en `DECISIONES.md`): ≈150 GB/día a 5.000/s. La memoria de idempotencia sí está acotada (D57).
 - **La ventana de idempotencia no se probó con 5 M ids reales de punta a punta** en el servidor (sí en pruebas unitarias con ventanas chicas y midiendo memoria/copia con 5 M ids en un test aislado).

@@ -1,4 +1,5 @@
 # Levantar todo:  docker compose up --build
+# Si algún puerto del host está ocupado: copie .env.example a .env y cambie el número (ver docs/EJECUTAR_LOCAL.md)
 # API en http://localhost:8080   ·   Postgres en localhost:5432 (usuario/clave: postgres/orderbook)
 services:
   postgres:
@@ -6,7 +7,7 @@ services:
     environment:
       POSTGRES_PASSWORD: orderbook
       POSTGRES_DB: orderbook
-    ports: ["5432:5432"]
+    ports: ["${POSTGRES_PORT:-5432}:5432"]   # host:contenedor (cámbielo en .env si 5432 está ocupado)
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d orderbook"]
@@ -17,8 +18,8 @@ services:
   orderbook:
     build: .
     ports:
-      - "8080:8080"
-      - "127.0.0.1:9102:9102"   # métricas/pprof: solo accesibles desde esta máquina
+      - "${API_PORT:-8080}:8080"
+      - "127.0.0.1:${METRICS_PORT:-9102}:9102"   # métricas/pprof: solo accesibles desde esta máquina
     environment:
       DATABASE_URL: postgres://postgres:orderbook@postgres:5432/orderbook
       QUEUE_SIZE: "50000"
@@ -51,7 +52,7 @@ services:
     image: prom/prometheus:v2.55.1
     command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=2d"]
     volumes: ["./ops/prometheus:/etc/prometheus:ro"]
-    ports: ["9090:9090"]
+    ports: ["${PROMETHEUS_PORT:-9090}:9090"]
     depends_on: [orderbook]
 
   grafana:
@@ -66,7 +67,7 @@ services:
     volumes:
       - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports: ["3000:3000"]
+    ports: ["${GRAFANA_PORT:-3000}:3000"]
     depends_on: [prometheus]
 
 volumes:

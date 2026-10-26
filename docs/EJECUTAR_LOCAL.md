@@ -21,6 +21,11 @@ Pensado para **Windows + Git Bash + Docker Desktop** (también sirve en Linux/ma
 > **Si `preflight` avisa de CRLF**: Git en Windows convirtió los scripts y fallarán. Ya hay un `.gitattributes` que lo evita; si tu clon es anterior, ejecuta
 > `git config core.autocrlf input && git rm --cached -r . && git reset --hard`.
 
+## 0b) Puertos ocupados (si `preflight` lo avisa)
+Los puertos del **host** son configurables sin tocar el compose: copia `.env.example` a `.env` y cambia solo el que esté ocupado
+(`POSTGRES_PORT`, `API_PORT`, `GRAFANA_PORT`, `PROMETHEUS_PORT`, `METRICS_PORT`). Dentro de Docker nada cambia: la app sigue hablando con Postgres por su puerto interno.
+Luego usa las URLs con tu puerto (p. ej. `localhost:8081` si `API_PORT=8081`).
+
 ## 1) Levantar todo
 ```bash
 docker compose up --build -d      # la primera vez descarga imágenes y compila: tarda unos minutos
@@ -30,7 +35,7 @@ Servicios y puertos:
 | Servicio | URL |
 |---|---|
 | API del order book | http://localhost:8080 |
-| Postgres (historial) | localhost:5432 · usuario `postgres` · clave `orderbook` · BD `orderbook` |
+| Postgres (historial) | localhost:5432 (`POSTGRES_PORT`) · usuario `postgres` · clave `orderbook` · BD `orderbook` |
 | **Grafana (dashboard)** | http://localhost:3000 (abre directo; editar: `admin` / `admin`) |
 | Prometheus y alertas | http://localhost:9090 · http://localhost:9090/alerts |
 | Métricas y pprof | http://localhost:9102/metrics |
@@ -97,7 +102,7 @@ docker compose down -v     # borra TODO (journal e historial): empieza de cero
 ## Problemas frecuentes
 | Síntoma | Causa y solución |
 |---|---|
-| `port is already allocated` | Otro programa usa 8080/5432: ciérralo o cambia el puerto en `docker-compose.yml` |
+| `Bind for 0.0.0.0:5432 failed: port is already allocated` | Otro programa de tu PC ya usa ese puerto (casi siempre un **PostgreSQL instalado en Windows**, servicio `postgresql-x64-NN`, o un contenedor viejo). **Solución rápida:** `docker compose down`, luego `cp .env.example .env`, edita `POSTGRES_PORT=5433` y vuelve a `docker compose up -d`. Sirve igual para `API_PORT`, `GRAFANA_PORT`, `PROMETHEUS_PORT` y `METRICS_PORT`. Los scripts leen ese `.env` solos. Para saber quién usa el puerto: `netstat -ano \| findstr :5432` y luego `tasklist \| findstr <PID>` |
 | `cannot connect to the Docker daemon` | Docker Desktop no está abierto |
 | Scripts fallan con `\r: command not found` | Saltos de línea CRLF; ver nota arriba |
 | La demo o el smoke dicen "el libro NO está vacío" | Quedaron órdenes de pruebas de carga o drills: `docker compose down -v && docker compose up -d` |
