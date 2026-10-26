@@ -88,6 +88,8 @@ Los drills de arriba usan Docker + `curl`. Este otro necesita **Go** instalado:
 ./scripts/drill-overload.sh            # sobrecarga: cola diminuta + 512 clientes => 503, sin perder nada
 ./scripts/drill-idempotency.sh         # ventana de idempotencia y reinicios con otra ventana
 ./scripts/drill-single-instance.sh     # un 2º proceso sobre el mismo journal se rechaza; --docker prueba un 2º contenedor
+./scripts/test-alerts.sh               # pruebas unitarias de las reglas de alerta (usa Docker, no toca datos)
+./scripts/soak.sh 20 5000              # RESISTENCIA: 20 min a 5.000/s; escribe varios GB (journal + Postgres ≈ 1 KB por orden); pide confirmación
 go test -race ./...                    # toda la batería de tests
 ```
 > En Docker Desktop el proceso de la app vive dentro de una VM: el drill usa `docker kill` y reinicia a mano

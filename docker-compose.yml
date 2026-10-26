@@ -23,7 +23,7 @@ services:
       - "127.0.0.1:${METRICS_PORT:-9102}:9102"   # métricas/pprof: solo accesibles desde esta máquina
     environment:
       DATABASE_URL: postgres://postgres:orderbook@postgres:5432/orderbook
-      QUEUE_SIZE: "50000"
+      QUEUE_SIZE: "10000"      # ≈ ritmo × plazo de la request (2 s)
       ADMIN_PORT: "9102"      # /metrics y pprof (puerto aparte de la API)
       LOG_LEVEL: info         # debug = una línea por request
     volumes: ["journal:/data"]   # el journal DEBE vivir en un volumen: es la fuente de verdad

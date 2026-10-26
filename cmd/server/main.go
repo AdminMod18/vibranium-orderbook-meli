@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -51,7 +52,9 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()}))
 	met := metrics.New(version)
 	addr := ":" + strconv.Itoa(envInt("PORT", 8080))
-	queueSize := envInt("QUEUE_SIZE", 50_000)
+	// Cola ≈ ritmo × plazo de la request (2 s): una cola mayor solo hace esperar a los clientes lo que luego
+	// será un 504, en vez de decirles 503 al instante. 10.000 ≈ 2 s a 5.000 órdenes/s.
+	queueSize := envInt("QUEUE_SIZE", 10_000)
 
 	// Recuperación: snapshot + cola del journal (o el journal completo si no hay snapshot utilizable).
 	journalPath := envStr("JOURNAL_PATH", "data/journal.log")
@@ -109,6 +112,16 @@ func main() {
 	met.GaugeFunc("queue_depth", "Comandos esperando en la cola del secuenciador.", func() float64 { return float64(seq.QueueLen()) })
 	met.GaugeFunc("queue_capacity", "Capacidad de la cola del secuenciador.", func() float64 { return float64(seq.QueueCap()) })
 	met.CounterFunc("queue_rejected_total", "Comandos rechazados por cola llena (HTTP 503).", func() float64 { return float64(seq.Overloaded()) })
+	// Espacio libre donde vive el journal: con el disco lleno el servicio hace fail-stop (no puede persistir).
+	// NaN = la plataforma no lo informa (ninguna alerta se dispara con NaN).
+	journalDir := filepath.Dir(journalPath)
+	met.GaugeFunc("journal_disk_free_bytes", "Bytes libres en el sistema de archivos del journal.", func() float64 {
+		if v, err := journal.DiskFree(journalDir); err == nil {
+			return float64(v)
+		}
+		return math.NaN()
+	})
+	met.CounterFunc("queue_expired_total", "Comandos descartados sin ejecutar porque su cliente ya no esperaba (timeout/desconexión).", func() float64 { return float64(seq.Expired()) })
 	met.CounterFunc("commands_processed_total", "Comandos ejecutados por el secuenciador.", func() float64 { return float64(seq.Processed()) })
 	met.GaugeFunc("journal_last_seq", "Último registro confirmado en el journal.", func() float64 { return float64(jr.LastSeq()) })
 	met.GaugeFunc("journal_bytes", "Tamaño del journal en bytes.", func() float64 { return float64(jr.Bytes()) })

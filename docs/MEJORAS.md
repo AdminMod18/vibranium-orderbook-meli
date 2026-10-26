@@ -14,8 +14,8 @@ Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 | R10 | Scripts destructivos sin confirmación; tests contra la base viva; deriva documental | ✅ Corregido (D65) |
 | R2 | El proyector leía el journal antes del fsync y no detectaba que Postgres estuviera adelantado | ✅ **Corregido (D68)**; residual en L18 |
 | R3 | Sin candado de instancia única sobre el journal | ✅ **Corregido (D67)**; no es alta disponibilidad (L3) |
-| R5 | Cola de 50.000 con timeout de 2 s ⇒ órdenes que se ejecutan tras un 504 | ⏳ **Pendiente (P1):** alinear `QUEUE_SIZE` ≈ ritmo × timeout y medirlo |
-| R7 | Journal sin rotación, sin alerta de disco, sin réplica | ⏳ Pendiente (P1 alerta de tamaño / P2 rotación y réplica) |
+| R5 | Cola de 50.000 con timeout de 2 s ⇒ órdenes que se ejecutaban tras un 504 (medido: 50 de 50) | ✅ **Corregido (D69):** se descartan sin ejecutar; cola por defecto 10.000; métrica y alerta `ExpiredCommands` |
+| R7 | Journal sin rotación, sin alerta de disco, sin réplica | ✅ **Alerta y métrica de disco (D70)** · ⏳ rotación del journal y réplica siguen en P2 (L13, L19) |
 | R8 | Interoperabilidad: los evaluadores deben fondear billeteras con `/deposits`; precios enteros en centavos | ⏳ **Pendiente de DECISIÓN:** preguntar a los evaluadores; ver el contrato en el README |
 | R9 | Rendimiento medido con fsync virtual, ≤ 100 s y generador co-ubicado | ⏳ Pendiente (P1): prueba de ≥ 30 min en disco real |
 
@@ -65,7 +65,7 @@ Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 |---|---|---|
 | 🔴 | ¿Cómo sabes que funciona? | ✅ Métricas Prometheus + dashboard Grafana provisionado (ver `OBSERVABILIDAD.md`) |
 | 🔴 | ¿Cómo depuras una orden? | ✅ Logs JSON con `request_id`/`order_id`; `GET /orders/{id}` con historial |
-| 🟠 | ¿Qué alertas pondrías? | ✅ 10 reglas en Prometheus · ⏭ Alertmanager → Slack/PagerDuty |
+| 🟠 | ¿Qué alertas pondrías? | ✅ 13 reglas en Prometheus, **cada una con prueba unitaria (promtool)** · ⏭ Alertmanager → Slack/PagerDuty |
 | 🟠 | ¿Y las trazas? | ⏭ **OpenTelemetry**: span por request que atraviese cola → matching → fsync; *exemplars* para saltar de una métrica a su traza |
 | 🟠 | ¿SLOs? | ⏭ Definir SLO (p.ej. 99 % de órdenes < 100 ms) y alertar por *burn rate* |
 | 🟢 | ¿Métricas por instrumento? | ⏭ Etiqueta `instrument` al particionar el mercado (cardinalidad baja) |

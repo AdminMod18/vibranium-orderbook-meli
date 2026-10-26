@@ -58,6 +58,8 @@ Consejo: durante el paso de carga, **mira el dashboard** y cuenta qué se ve (ó
 | ¿Postgres puede quedar adelantado al journal? | No: el proyector solo lee lo ya sincronizado (fsync) y, si aun así detecta a Postgres por delante, **se detiene y avisa** en vez de saltarse órdenes | `DECISIONES.md` D68 |
 | ¿Cómo evitas el doble gasto? | Reserva de fondos al ingresar + secuenciador único | `smoke.sh` paso 3 |
 | ¿Y reintentos de bots? | `id` de orden = clave de idempotencia (409 si se repite) | `DECISIONES.md` D18 |
+| ¿Qué pasa si un cliente da timeout mientras su orden espera en cola? | El secuenciador **descarta sin ejecutar** lo que ya nadie espera (antes se ejecutaba: medido 50 de 50). Solo queda una ventana mínima si ya estaba en marcha; el reintento con el mismo id da 409 | `D69`, test `TestCommandsWhoseClientGaveUp…` |
+| ¿Qué pasa si se llena el disco? | Alerta `JournalDiskLow` (< 2 GiB) y `JournalDiskFillingUp` (< 6 h); si se llena, fail-stop. Rotación del journal: pendiente (L13) | `D70` |
 | ¿Qué pasa con días de operación? | La idempotencia está **acotada por una ventana** (5 M ids ≈ 409 MiB); el journal sí crece (≈150 GB/día a 5.000/s): hay que rotarlo (L13). Los snapshots ya lo permiten | `DECISIONES.md` D57, L13 |
 | ¿Y si un bot reintenta mucho después? | Pasada la ventana (≈17 min a 5.000/s) se acepta como nueva; si la orden sigue en el libro, se rechaza igual. Contrapartida estándar de toda API con claves de idempotencia | `drill-idempotency.sh` |
 | ¿Cómo sabes que funciona? | Tests con `-race`, smoke, drills, auditoría en vivo y `verify-all.sh` | `INFORME_PRUEBAS.md` |

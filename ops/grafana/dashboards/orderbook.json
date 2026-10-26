@@ -501,7 +501,7 @@
    "id": 9,
    "type": "timeseries",
    "title": "Cola del secuenciador (profundidad y rechazos)",
-   "description": "Comandos esperando en la cola (capacidad: 50.000). La cola absorbe ráfagas; sostenida cerca de la capacidad = el matching no da abasto. Con la cola llena se responde 503.",
+   "description": "Comandos esperando en la cola (capacidad: 50.000). La cola absorbe ráfagas; sostenida cerca de la capacidad = el matching no da abasto. Con la cola llena se responde 503. «Descartadas por expiración»: comandos cuyo cliente ya se había rendido (timeout) y que NO se ejecutaron.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
@@ -526,6 +526,15 @@
      "refId": "C",
      "expr": "rate(orderbook_queue_rejected_total[1m])",
      "legendFormat": "rechazos/s (503)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    },
+    {
+     "refId": "C",
+     "expr": "rate(orderbook_queue_expired_total[1m])",
+     "legendFormat": "descartadas por expiración/s",
      "datasource": {
       "type": "prometheus",
       "uid": "prometheus"
@@ -1000,7 +1009,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 60,
+    "y": 68,
     "w": 24,
     "h": 6
    },
@@ -1205,6 +1214,66 @@
       ]
      }
     ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   }
+  },
+  {
+   "id": 20,
+   "type": "timeseries",
+   "title": "Disco del journal",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "description": "Espacio libre donde vive el journal y su tamaño. Con el disco lleno el servicio hace fail-stop. Alertas: JournalDiskLow (< 2 GiB) y JournalDiskFillingUp (se llena en < 6 h).",
+   "gridPos": {
+    "x": 0,
+    "y": 60,
+    "w": 24,
+    "h": 6
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "orderbook_journal_disk_free_bytes",
+     "legendFormat": "libre en disco",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "orderbook_journal_bytes",
+     "legendFormat": "tamaño del journal",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "stacking": {
+       "mode": "none"
+      }
+     },
+     "min": 0
+    },
+    "overrides": []
    },
    "options": {
     "legend": {

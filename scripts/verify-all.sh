@@ -42,6 +42,7 @@ if [ $HAVE_GO = 1 ]; then
   TAIL=10 step "Tests unitarios y de concurrencia (go test -race)" bash -c 'go vet ./... && go test -race -count=1 ./...'
 else skip "Tests (go test)" "Go no instalado o SKIP_GO=1"; fi
 
+TAIL=3 step "Alertas: pruebas unitarias de las 13 reglas (promtool)" ./scripts/test-alerts.sh
 step "Levantar el stack desde cero" reset_stack
 TAIL=8 step "Smoke test end-to-end (22 comprobaciones)" ./scripts/smoke.sh
 TAIL=6 step "Carga: 5.000 órdenes/s durante 15 s + auditoría de saldos" $COMPOSE run --rm loadgen -rate 5000 -duration 15s -workers 128

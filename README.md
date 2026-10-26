@@ -67,6 +67,8 @@ Fases 1-6 completas: motor de matching, billeteras con reserva de fondos, API + 
 ./scripts/drill-overload.sh        # sobrecarga: cola diminuta + 512 clientes => 503 sin perder nada
 ./scripts/drill-idempotency.sh     # ventana de idempotencia: reciente=409, antiguo=nuevo, reinicio con otra ventana
 ./scripts/drill-single-instance.sh # una sola instancia por journal: el 2º proceso/contenedor se rechaza
+./scripts/test-alerts.sh           # pruebas unitarias de las 13 reglas de alerta (promtool, vía Docker)
+./scripts/soak.sh 20 5000          # prueba de resistencia: 20 min a 5.000/s con muestreo de memoria, snapshots, disco y reinicio final
 ./scripts/drill-kill9.sh          # carga concurrente -> kill -9 -> reinicio -> verifica saldos
 ./scripts/drill-postgres-down.sh   # Postgres cae en pleno uso: el matching sigue y el historial se reconcilia
 ./scripts/drill-docker-crash.sh    # crash real (kill -9 al proceso) de la app en el compose: Docker la reinicia y recupera el journal
