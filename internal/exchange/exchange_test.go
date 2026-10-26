@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/domain"
+	"github.com/AdminMod18/vibranium-orderbook-meli/internal/engine"
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/wallet"
 )
 
@@ -354,5 +356,74 @@ func TestRestoreAppliesTheCurrentWindow(t *testing.T) {
 	big, _ := Restore(st, 1000)
 	if big.SeenCount() != 10 {
 		t.Fatalf("got %d", big.SeenCount())
+	}
+}
+
+// --- Identificadores y órdenes truncadas ---
+
+func TestInvalidIdentifiersAreRejectedWithoutAnySideEffect(t *testing.T) {
+	x := newEx(t, map[string][2]int64{"alice": {1_000_000, 100}})
+	before := x.Balance("alice")
+	huge := strings.Repeat("X", 400_000)
+	for name, o := range map[string]domain.Order{
+		"id de 400 KB":      ord(huge, "alice", domain.Buy, 10, 1),
+		"user_id de 400 KB": ord("o1", huge, domain.Buy, 10, 1),
+		"id con espacio":    ord("o 1", "alice", domain.Buy, 10, 1),
+		"id con barra":      ord("o/1", "alice", domain.Buy, 10, 1),
+	} {
+		if _, err := x.PlaceOrder(o); !errors.Is(err, domain.ErrInvalidID) {
+			t.Errorf("%s: debe rechazarse con ErrInvalidID, got %v", name, err)
+		}
+	}
+	if err := x.Deposit(huge, 1, 1); !errors.Is(err, domain.ErrInvalidID) {
+		t.Errorf("depósito con user_id enorme: %v", err)
+	}
+	if x.Balance("alice") != before || x.SeenCount() != 0 || x.book.Depth(domain.Buy, 5) != nil && len(x.book.Depth(domain.Buy, 5)) != 0 {
+		t.Fatal("un identificador inválido no debe dejar reservas, ids vistos ni órdenes")
+	}
+	if err := x.CheckInvariants(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// El journal contiene lo que se aceptó: al reproducirlo NO se vuelve a juzgar el formato del id
+// (un journal escrito antes de estas reglas debe seguir arrancando).
+func TestReplayStillAcceptsLegacyIdentifiers(t *testing.T) {
+	x := New()
+	if err := x.ReplayDeposit("usuario con espacios/ñ", 1_000, 0); err != nil {
+		t.Fatalf("replay de depósito: %v", err)
+	}
+	if _, err := x.ReplayOrder(ord("orden heredada #1", "usuario con espacios/ñ", domain.Buy, 10, 5)); err != nil {
+		t.Fatalf("replay de orden: %v", err)
+	}
+	if err := x.CheckInvariants(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTruncatedOrderReleasesItsReservationAndKeepsInvariants(t *testing.T) {
+	const makers = 25_000
+	x := New()
+	_ = x.Deposit("maker", 0, makers)
+	_ = x.Deposit("taker", 10*makers, 0)
+	for i := 0; i < makers; i++ {
+		if _, err := x.PlaceOrder(ord(fmt.Sprintf("m%d", i), "maker", domain.Sell, 10, 1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := x.PlaceOrder(ord("big", "taker", domain.Buy, 10, makers))
+	if err != nil || res.Order.Status != domain.StatusCancelled || len(res.Trades) != engine.MaxTradesPerOrder {
+		t.Fatalf("orden truncada: %v %+v trades=%d", err, res.Order, len(res.Trades))
+	}
+	want := wallet.Account{BRLFree: 10*makers - 10*engine.MaxTradesPerOrder, VIBFree: engine.MaxTradesPerOrder}
+	if got := x.Balance("taker"); got != want {
+		t.Fatalf("el remanente debe liberarse (sin dinero colgado): got %+v want %+v", got, want)
+	}
+	if err := x.CheckInvariants(); err != nil {
+		t.Fatal(err)
+	}
+	// la orden truncada cuenta como aceptada: un reintento con el mismo id da 409
+	if _, err := x.PlaceOrder(ord("big", "taker", domain.Buy, 10, 1)); !errors.Is(err, ErrDuplicateOrder) {
+		t.Fatalf("got %v", err)
 	}
 }

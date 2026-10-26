@@ -2,6 +2,8 @@
 // ni I/O: es el lenguaje común que comparten el motor, la API y la persistencia.
 package domain
 
+import "errors"
+
 // Dinero y cantidades son SIEMPRE enteros, nunca float:
 //   - Price: centavos de real por 1 unidad de Vibranium (R$ 12,34 -> 1234).
 //   - Qty:   unidades enteras de Vibranium.
@@ -11,6 +13,31 @@ type (
 	Price int64
 	Qty   int64
 )
+
+// MaxIDLen es la longitud máxima de un identificador (id de orden o de usuario).
+const MaxIDLen = 64
+
+// ErrInvalidID indica un identificador fuera de las reglas: 1-64 caracteres entre [A-Za-z0-9._:@+-].
+// Se acota porque los ids se guardan en memoria (ventana de idempotencia), en el journal y en
+// Postgres: sin límite, una sola petición con un id enorme podría romper el journal o agotar memoria.
+var ErrInvalidID = errors.New("identificador inválido: debe tener 1-64 caracteres entre [A-Za-z0-9._:@+-]")
+
+// ValidID comprueba un identificador.
+func ValidID(s string) bool {
+	if len(s) == 0 || len(s) > MaxIDLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.', c == '_', c == ':', c == '@', c == '+', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 type Side uint8
 

@@ -7,7 +7,7 @@
 
 | Capa | Qué demuestra | Cómo se ejecuta |
 |---|---|---|
-| **45 tests de Go** con el detector de carreras (`-race`) | Reglas del libro (precio-tiempo, parciales, precio del maker), reservas, saldos, idempotencia, concurrencia (100 goroutines), journal (cola truncada, CRC, corrupción real), recuperación, snapshots, API y métricas | `go test -race ./...` |
+| **61 tests de Go** con el detector de carreras (`-race`) | Reglas del libro (precio-tiempo, parciales, precio del maker), reservas, saldos, idempotencia, concurrencia (100 goroutines), journal (cola truncada, CRC, corrupción real), recuperación, snapshots, API y métricas | `go test -race ./...` |
 | **Pruebas aleatorias de invariantes** | 20.000 órdenes con cancelaciones: el libro nunca queda cruzado, se conserva el valor, cada trade respeta los límites de precio | dentro de `go test` |
 | **Integración con Postgres real** | El historial reproduce al motor; el saldo recalculado desde depósitos+trades == billetera; reinicio del proyector sin duplicados; Postgres caído; journal ajeno rechazado | `TEST_DATABASE_URL=… go test ./internal/history` |
 | **Matriz de recuperación** | Caída sin apagado ordenado, apagado ordenado, reinicios encadenados y 6 snapshots inservibles (corrupto, truncado, de otro journal, offset inválido, offset fuera de rango, estado inconsistente): **todos llegan al mismo estado** | `go test ./internal/recovery` |
@@ -15,7 +15,7 @@
 | **Carga** | 5.000 órdenes/s con generador *open-loop* y auditoría de saldos al final | `docker compose run --rm loadgen -rate 5000` |
 | **5 drills** | Ver §3 | `./scripts/drill-*.sh` |
 
-Cobertura de sentencias por paquete (cada uno con sus propios tests): exchange 87,5 %, engine 85,6 %, recovery 84,6 %, sequencer 76,1 %, api 61,1 %, journal 53,1 %, snapshot 43,2 %. *(La restauración del libro vive en `engine` pero se prueba desde `exchange` y `recovery`, y Go no cuenta la cobertura entre paquetes; `history` marca 16 % porque sus tests exigen Postgres y se omiten sin `TEST_DATABASE_URL`.)*
+Cobertura de sentencias por paquete (cada uno con sus propios tests): exchange 89,8 %, recovery 84,6 %, engine 83,7 %, sequencer 76,9 %, api 62,6 %, journal 53,1 %, snapshot 43,2 %, domain 31,8 %. *(La restauración del libro vive en `engine` pero se prueba también desde `exchange` y `recovery`, y Go no cuenta la cobertura entre paquetes; `history` marca 16 % porque sus tests exigen Postgres y se omiten sin `TEST_DATABASE_URL`, que **debe apuntar a una base de pruebas** —el nombre debe contener `test`— porque esos tests hacen `DROP TABLE`.)*
 
 ## 2. Capacidad
 
@@ -63,6 +63,13 @@ Cada ítem es un defecto o una creencia errónea que **una prueba descubrió** y
 10. **Un puerto ocupado en la máquina real impedía arrancar** (`Bind for 0.0.0.0:5432 failed`): un PostgreSQL de Windows usaba el 5432. Solo salió al probar en un equipo ajeno al de desarrollo. *Corregido* con puertos configurables (`.env`) y un `preflight` que lo detecta y explica la salida; reproducido y verificado ocupando el puerto a propósito.
 9. **La demo y el smoke exigen un libro vacío** (si no, los cruces no son los esperados tras una prueba de carga): ahora lo comprueban, avisan cómo reiniciar y se limpian solos.
 
+### Hallazgos de la auditoría independiente (y su estado)
+11. **Una petición de 400 KB tumbaba el servicio** (`id` sin límite ⇒ registro de journal > 1 MiB ⇒ `panic`). *Corregido:* `id` y `user_id` de 1-64 caracteres `[A-Za-z0-9._:@+-]` (D61), con regresión a nivel HTTP.
+12. **Una orden LEGÍTIMA que cruzaba ≈ 6.100 órdenes tumbaba el servicio** (mismo límite de 1 MiB por registro; 171 B/trade). Se halló al intentar arreglar el punto 11. *Corregido:* tope de 10.000 trades por orden con remanente cancelado (D62) y límite de registro de 16 MiB; un test comprueba que **el peor registro posible (5,3 MiB) cabe** (D63).
+13. **`GET /book` con 50.000 niveles de precio bloqueaba el motor 0,8 s** (ordenamiento O(L²) dentro del secuenciador). *Corregido:* O(L log L) (D64).
+14. **Los tests de integración podían borrar la base viva** (el README los apuntaba a ella) y **`verify-all`/`drill-postgres-down` borraban datos sin preguntar**. *Corregido:* los tests solo corren contra bases cuyo nombre contenga `test`; los scripts piden confirmación (D65).
+15. **Postgres, Grafana y Prometheus escuchaban en todas las interfaces con claves por defecto.** *Corregido:* solo `127.0.0.1` (D66).
+
 ## 5. Limitaciones (lo que NO se probó o no es válido)
 
 - **Windows/Git Bash y Docker Desktop no se pudieron probar** (el desarrollo se hizo en Linux). Los scripts contemplan `.exe`, CRLF y PIDs ajenos, pero requieren que se ejecute `./scripts/preflight.sh` allí.
@@ -76,6 +83,6 @@ Cada ítem es un defecto o una creencia errónea que **una prueba descubrió** y
 
 ```bash
 ./scripts/preflight.sh        # ¿tengo lo necesario?
-./scripts/verify-all.sh       # todo: tests + stack + smoke + carga + 4 drills (tabla PASS/FAIL)
+./scripts/verify-all.sh       # todo: tests + stack + smoke + carga + 5 drills (tabla PASS/FAIL; pide confirmación porque borra volúmenes)
 ./scripts/demo.sh             # guion interactivo para la presentación
 ```

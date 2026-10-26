@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/AdminMod18/vibranium-orderbook-meli/internal/domain"
 )
@@ -233,5 +234,59 @@ func BenchmarkSubmit(b *testing.B) {
 		}
 		_, _ = book.Submit(ord(fmt.Sprintf("o%d", i), "u", side,
 			domain.Price(95+rng.Intn(11)), domain.Qty(1+rng.Intn(20))))
+	}
+}
+
+// --- Acotación del trabajo por orden (MaxTradesPerOrder) y rendimiento de Depth ---
+
+func TestSweepIsCappedAndRemainderIsCancelledNotRested(t *testing.T) {
+	const makers = 25_000
+	b := NewBook()
+	for i := 0; i < makers; i++ {
+		mustSubmit(t, b, ord(fmt.Sprintf("m%d", i), "maker", domain.Sell, 10, 1))
+	}
+	r := mustSubmit(t, b, ord("big", "taker", domain.Buy, 10, makers))
+	if len(r.Trades) != MaxTradesPerOrder || r.Order.Filled != MaxTradesPerOrder {
+		t.Fatalf("debía ejecutar exactamente el tope (%d): trades=%d filled=%d", MaxTradesPerOrder, len(r.Trades), r.Order.Filled)
+	}
+	if r.Order.Status != domain.StatusCancelled {
+		t.Fatalf("el remanente debe cancelarse: %v", r.Order.Status)
+	}
+	if len(b.Depth(domain.Buy, 5)) != 0 {
+		t.Fatal("el remanente NO puede quedar en el libro (lo dejaría cruzado)")
+	}
+	if d := b.Depth(domain.Sell, 5); len(d) != 1 || d[0].Qty != makers-MaxTradesPerOrder {
+		t.Fatalf("deben quedar %d ventas: %+v", makers-MaxTradesPerOrder, d)
+	}
+	// prioridad de tiempo preservada: se ejecutaron las más antiguas
+	if r.Trades[0].MakerOrderID != "m0" || r.Trades[MaxTradesPerOrder-1].MakerOrderID != fmt.Sprintf("m%d", MaxTradesPerOrder-1) {
+		t.Fatal("debe ejecutar primero las órdenes más antiguas")
+	}
+	// una orden cuyo cruce cabe exacto en el tope NO se trunca
+	b2 := NewBook()
+	for i := 0; i < MaxTradesPerOrder; i++ {
+		mustSubmit(t, b2, ord(fmt.Sprintf("m%d", i), "maker", domain.Sell, 10, 1))
+	}
+	if r := mustSubmit(t, b2, ord("exact", "taker", domain.Buy, 10, MaxTradesPerOrder)); r.Order.Status != domain.StatusFilled {
+		t.Fatalf("un cruce que cabe en el tope debe quedar FILLED: %v", r.Order.Status)
+	}
+}
+
+func TestDepthWithManyLevelsIsOrderedAndFast(t *testing.T) {
+	const levels = 50_000 // con el ordenamiento O(L²) anterior, esto bloqueaba el motor ~0,8 s
+	asks, bids := NewBook(), NewBook()
+	for i, p := range rand.New(rand.NewSource(3)).Perm(levels) {
+		mustSubmit(t, asks, ord(fmt.Sprintf("a%d", i), "u", domain.Sell, domain.Price(p+1), 1))
+		mustSubmit(t, bids, ord(fmt.Sprintf("b%d", i), "u", domain.Buy, domain.Price(p+1), 1))
+	}
+	t0 := time.Now()
+	a, bd := asks.Depth(domain.Sell, 10), bids.Depth(domain.Buy, 10)
+	if el := time.Since(t0); el > 250*time.Millisecond {
+		t.Fatalf("Depth con %d niveles tardó %v (debe ser O(L log L))", levels, el)
+	}
+	for i := 0; i < 10; i++ {
+		if a[i].Price != domain.Price(i+1) || bd[i].Price != domain.Price(levels-i) {
+			t.Fatalf("orden incorrecto en %d: ask=%d bid=%d", i, a[i].Price, bd[i].Price)
+		}
 	}
 }

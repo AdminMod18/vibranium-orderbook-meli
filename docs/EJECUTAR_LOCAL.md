@@ -68,7 +68,7 @@ Precios en **centavos** de real; cantidades en **unidades** de Vibranium.
 ```bash
 ./scripts/verify-all.sh      # tests + stack desde cero + smoke + carga a 5.000/s + 5 drills; termina con una tabla PASS/FAIL
 ```
-**Atención:** reinicia el stack y **borra los datos locales** (`down -v`). Con `SKIP_GO=1` se omiten los pasos que requieren Go.
+**Atención:** reinicia el stack y **borra los datos locales** (`down -v`): por eso **pide que escribas `SI`** antes de empezar (`ASSUME_YES=1` para automatizar). Con `SKIP_GO=1` se omiten los pasos que requieren Go.
 
 ## 2c) Ensayar la demo
 ```bash
@@ -80,7 +80,7 @@ docker compose down -v && docker compose up -d   # libro vacío
 Con el stack arriba:
 ```bash
 ./scripts/drill-docker-crash.sh        # mata la app en plena carga; se recupera desde el journal
-./scripts/drill-postgres-down.sh       # (antes: docker compose stop orderbook) Postgres cae; el matching sigue
+./scripts/drill-postgres-down.sh       # (antes: docker compose stop orderbook) Postgres cae; el matching sigue. Vacía el historial: pide confirmación
 ```
 Los drills de arriba usan Docker + `curl`. Este otro necesita **Go** instalado:
 ```bash

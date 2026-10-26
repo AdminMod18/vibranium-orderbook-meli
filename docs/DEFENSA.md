@@ -250,7 +250,7 @@ Cola de 8 posiciones y 512 clientes a máxima velocidad (≈32.000 req/s de pres
 - *¿Qué pasa si el snapshot está corrupto?* Se ignora y se reproduce el journal: el snapshot nunca es la verdad.
 - *¿Cuánto escala?* 16.000 órdenes/s medidas (3,2× el objetivo) en una máquina de 4 núcleos compartida; el matching usa el 2,3 % del CPU. Más allá: particionar por instrumento y separar API/secuenciador.
 - *¿Qué pasa con días de operación?* La memoria de idempotencia está **acotada** por una ventana (5 M ids ≈ 409 MiB; configurable). Queda el crecimiento del journal (≈150 GB/día a 5.000/s): los snapshots ya permiten truncar lo anterior, falta implementar la rotación por segmentos (L13).
-- *¿Cómo sabes que funciona?* `./scripts/verify-all.sh`: tests con race detector, smoke de 22 comprobaciones, carga a 5.000/s y 4 drills, con tabla PASS/FAIL.
+- *¿Cómo sabes que funciona?* `./scripts/verify-all.sh`: tests con race detector, smoke de 22 comprobaciones, carga a 5.000/s y 5 drills, con tabla PASS/FAIL.
 
 ### Idempotencia con ventana (`internal/exchange/idwindow.go`)
 - **Qué hace:** recuerda los últimos N ids aceptados (5 M por defecto, `IDEMPOTENCY_WINDOW`). Reintento reciente ⇒ 409. Más antiguo que la ventana ⇒ se trata como orden nueva. Si la orden **sigue en el libro**, se rechaza igual.

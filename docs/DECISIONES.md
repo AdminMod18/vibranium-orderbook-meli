@@ -105,6 +105,17 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 | D59 | Un id fuera de la ventana **se acepta como orden nueva**; pero si su orden **sigue en el libro**, el libro la rechaza igual (409, sin dejar reservas colgadas) | Un cliente real reintenta a los segundos o minutos; esta es la contrapartida estándar de toda API con claves de idempotencia (p. ej. 24 h en pagos). Que la orden siga abierta se protege siempre | Ventana infinita (D18 original) | ✅ |
 | D60 | Al **reproducir el journal no se comprueba la ventana** (`ReplayOrder`) | El journal solo contiene lo que se aceptó, aunque la ventana fuera otra. **Cambiar `IDEMPOTENCY_WINDOW` entre reinicios nunca impide arrancar.** Una mutación de prueba demostró que, si la reproducción comprobara duplicados, un reinicio con otra ventana fallaría con "la reproducción divergió" | Comprobar y fallar: un cambio de configuración dejaría el servicio caído | ✅ |
 
+## Endurecimiento tras la auditoría (D61-D66)
+
+| # | Decisión | Por qué | Alternativas / costo | Estado |
+|---|---|---|---|---|
+| D61 | `id` de orden y `user_id`: **1-64 caracteres `[A-Za-z0-9._:@+-]`**, validados solo en la ruta EN VIVO | Un id enorme rompía el journal y la ventana de idempotencia no tenía tope en bytes. Al **reproducir** el journal no se vuelve a juzgar el formato (`ReplayOrder`/`ReplayDeposit`): un journal anterior a la regla sigue arrancando | Validar también en el replay: un cambio de reglas dejaría el servicio sin arrancar | ✅ |
+| D62 | **Tope de 10.000 trades por orden**; si aún hay precios compatibles, el remanente se **cancela** (no se deja en el libro) y se libera la reserva | Acota el trabajo de un comando en un motor de un solo hilo y el tamaño de su registro. Una orden legítima de ≈ 6.100 cruces tumbaba el servicio | Dejar el remanente en el libro: lo dejaría **cruzado**. Rechazar la orden antes de ejecutar: requeriría simular el cruce | ✅ |
+| D63 | Límite de registro del journal **16 MiB** y un test que fija la garantía (peor registro = 5,3 MiB) | Subir un tope sin el otro dejaba un `panic` latente; ahora lo detecta un test | Chunking de registros: más complejo sin necesidad | ✅ |
+| D64 | `Depth` en **O(L log L)** | Un `GET /book` con 50.000 niveles bloqueaba el motor 0,8 s | Servir lecturas fuera del secuenciador (copia de lectura): más piezas | ✅ |
+| D65 | Scripts destructivos **piden confirmación** (`ASSUME_YES=1` para automatizar); los tests de integración **se niegan a correr** contra una base cuyo nombre no contenga `test` | Evitar borrar datos por accidente | — | ✅ |
+| D66 | Postgres, Prometheus, Grafana y métricas **solo en `127.0.0.1`**; la API queda abierta | Claves por defecto no deben quedar expuestas a la red local; la API debe poder llamarla un evaluador | API también en loopback: protege más, pero puede impedir probarla desde otro equipo o contenedor | ✅ |
+
 ## Plataforma
 
 | # | Decisión | Por qué | Estado |
@@ -135,6 +146,8 @@ Regla del desafío: *"Cuidado con el overengineering"*. Varias decisiones son si
 
 - ~~**L8 — La etapa de build del `Dockerfile` no se pudo ejecutar en el entorno de desarrollo.**~~ **Resuelta:** `docker compose up --build` se ejecutó con éxito en una máquina Windows con Docker Desktop (el build completo, `go mod download` incluido, terminó sin errores).
 - **L15 — Puertos del host fijos.** Un PostgreSQL ya instalado en la máquina ocupaba el 5432 y el compose no arrancaba. *Corregido:* puertos configurables por `.env` (`.env.example`), `preflight` los detecta y explica qué hacer, y los scripts los respetan.
+- **L16 — La API no tiene autenticación**: cualquiera puede depositar y **cancelar cualquier orden por su id** (`DELETE /orders/{id}` no comprueba al dueño). Aceptado por el desafío (no hace falta login); en producción requiere identidad y autorización.
+- **L17 — `GET /audit`, la copia del snapshot y las lecturas corren dentro del secuenciador**: con 1.000.000 de órdenes abiertas `/audit` bloquea el motor ≈ 0,55 s y la copia del snapshot ≈ 0,6 s (medido). Mitigación pendiente: lecturas desde una copia, fuera del camino de escritura.
 - **L9 — El proyector relee el journal desde el inicio al arrancar** (salta lo ya reflejado). Es O(tamaño del log); con segmentos rotados + índice sería O(1). Ver `MEJORAS.md`.
 - **L10 — Las cifras de rendimiento se midieron en una máquina de 4 núcleos compartida** con disco virtual. Son una referencia, no una garantía; ver `OBSERVABILIDAD.md` (condiciones y colas largas bajo contención). Repetir en la máquina de la presentación.
 - **L11 — Sin trazas distribuidas.** Hay métricas y logs con `request_id`, pero no OpenTelemetry (ver `MEJORAS.md`).

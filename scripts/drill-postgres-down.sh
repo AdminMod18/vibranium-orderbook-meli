@@ -14,6 +14,12 @@ pg_reset() {
   if [ -n "${PG_RESET:-}" ]; then eval "$PG_RESET"
   else docker compose exec -T postgres psql -q -U postgres -d orderbook -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public"; fi
 }
+if [ "${ASSUME_YES:-0}" != 1 ]; then
+  echo "ATENCIÓN: este drill VACÍA el esquema 'public' de la base de Postgres del compose (borra el historial) y"
+  echo "detiene/arranca el contenedor de Postgres. La app del compose debe estar detenida (docker compose stop orderbook)."
+  if [ ! -t 0 ]; then echo "Sin terminal interactiva: defina ASSUME_YES=1 para confirmar."; exit 2; fi
+  read -r -p "Escriba SI para continuar: " ans; [ "$ans" = SI ] || { echo "Cancelado."; exit 1; }
+fi
 pg_reset >/dev/null 2>&1
 
 WORK=$(mktemp -d)

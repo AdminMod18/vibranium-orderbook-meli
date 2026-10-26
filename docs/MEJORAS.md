@@ -4,6 +4,21 @@ Documento vivo. El desafío evalúa sobre todo la **arquitectura** (escala, resi
 Cada ítem es una pregunta que un evaluador podría hacer, la respuesta de hoy y el siguiente paso.
 Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 
+## Estado de los hallazgos de la auditoría independiente
+| # | Hallazgo | Estado |
+|---|---|---|
+| R1 | `id`/`user_id` sin límite tumbaba el servicio | ✅ Corregido (D61) |
+| — | Una orden legítima que cruzaba ≈ 6.100 órdenes tumbaba el servicio | ✅ Corregido (D62, D63) |
+| R4 | `GET /book` O(L²) dentro del secuenciador | ✅ Corregido (D64); `/audit` y la copia del snapshot siguen siendo O(órdenes) (L17) |
+| R6 | Puertos y claves por defecto expuestos | ✅ Corregido (D66); la API sigue sin autenticación a propósito (L16) |
+| R10 | Scripts destructivos sin confirmación; tests contra la base viva; deriva documental | ✅ Corregido (D65) |
+| R2 | El proyector lee el journal antes del fsync y no detecta que Postgres esté adelantado | ⏳ **Pendiente (P1):** leer solo hasta el offset sincronizado y comprobar `last_seq` de Postgres ≤ final del journal |
+| R3 | Sin candado de instancia única sobre el journal | ⏳ **Pendiente (P1):** `flock`/lockfile |
+| R5 | Cola de 50.000 con timeout de 2 s ⇒ órdenes que se ejecutan tras un 504 | ⏳ **Pendiente (P1):** alinear `QUEUE_SIZE` ≈ ritmo × timeout y medirlo |
+| R7 | Journal sin rotación, sin alerta de disco, sin réplica | ⏳ Pendiente (P1 alerta de tamaño / P2 rotación y réplica) |
+| R8 | Interoperabilidad: los evaluadores deben fondear billeteras con `/deposits`; precios enteros en centavos | ⏳ **Pendiente de DECISIÓN:** preguntar a los evaluadores; ver el contrato en el README |
+| R9 | Rendimiento medido con fsync virtual, ≤ 100 s y generador co-ubicado | ⏳ Pendiente (P1): prueba de ≥ 30 min en disco real |
+
 ## Resiliencia
 
 | Pri | Pregunta del evaluador | Respuesta hoy | Siguiente paso |

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	neturl "net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,12 +22,18 @@ import (
 
 // Pruebas de integración contra un Postgres REAL.
 //
-//	TEST_DATABASE_URL=postgres://postgres:orderbook@localhost:5432/orderbook go test ./internal/history
+//	docker compose exec -T postgres psql -U postgres -c "CREATE DATABASE orderbook_test"   (una vez)
+//	TEST_DATABASE_URL=postgres://postgres:orderbook@localhost:5432/orderbook_test go test ./internal/history
 func openStore(t *testing.T) *history.Store {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("TEST_DATABASE_URL no definida: se omiten las pruebas con Postgres")
+	}
+	// Estos tests hacen DROP TABLE: por seguridad solo corren contra bases cuyo nombre contenga "test"
+	// (p. ej. .../orderbook_test), NUNCA contra la base viva del compose.
+	if u, perr := neturl.Parse(url); perr != nil || !strings.Contains(strings.ToLower(strings.TrimPrefix(u.Path, "/")), "test") {
+		t.Skipf("TEST_DATABASE_URL no apunta a una base de pruebas (el nombre debe contener 'test'): se omite para no borrar datos")
 	}
 	ctx := context.Background()
 	st, err := history.Open(ctx, url)

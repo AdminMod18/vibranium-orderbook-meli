@@ -7,7 +7,8 @@ services:
     environment:
       POSTGRES_PASSWORD: orderbook
       POSTGRES_DB: orderbook
-    ports: ["${POSTGRES_PORT:-5432}:5432"]   # host:contenedor (cámbielo en .env si 5432 está ocupado)
+    # Solo accesible desde ESTA máquina (127.0.0.1): usa la clave por defecto de la demo. Cambie el número en .env si el puerto está ocupado.
+    ports: ["127.0.0.1:${POSTGRES_PORT:-5432}:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d orderbook"]
@@ -18,7 +19,7 @@ services:
   orderbook:
     build: .
     ports:
-      - "${API_PORT:-8080}:8080"
+      - "${API_PORT:-8080}:8080"             # la API queda abierta a la red para que los evaluadores puedan llamarla (sin autenticación: MVP)
       - "127.0.0.1:${METRICS_PORT:-9102}:9102"   # métricas/pprof: solo accesibles desde esta máquina
     environment:
       DATABASE_URL: postgres://postgres:orderbook@postgres:5432/orderbook
@@ -52,7 +53,7 @@ services:
     image: prom/prometheus:v2.55.1
     command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=2d"]
     volumes: ["./ops/prometheus:/etc/prometheus:ro"]
-    ports: ["${PROMETHEUS_PORT:-9090}:9090"]
+    ports: ["127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"]
     depends_on: [orderbook]
 
   grafana:
@@ -67,7 +68,7 @@ services:
     volumes:
       - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports: ["${GRAFANA_PORT:-3000}:3000"]
+    ports: ["127.0.0.1:${GRAFANA_PORT:-3000}:3000"]   # usuario admin / clave admin: solo para demo local
     depends_on: [prometheus]
 
 volumes:

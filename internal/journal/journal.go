@@ -28,7 +28,9 @@ import (
 const (
 	formatVersion = 1
 	headerSize    = 8
-	maxRecordSize = 1 << 20
+	// 16 MiB: holgura sobre el peor caso (engine.MaxTradesPerOrder trades con ids de 64 caracteres ≈ 5 MB;
+	// lo comprueba TestWorstCaseRecordFitsTheLimit). Un registro mayor haría fallar el Append (fail-stop).
+	maxRecordSize = 16 << 20
 )
 
 var (

@@ -2,7 +2,8 @@
 # Verificación completa: tests + smoke + carga + drills de resiliencia, con una tabla PASS/FAIL al final.
 # Nada puede fallar en silencio: cada paso se ejecuta aislado y se informa su resultado y duración.
 #
-#   ./scripts/verify-all.sh            (~4 min; reinicia el stack desde cero: BORRA los datos locales)
+#   ./scripts/verify-all.sh            (~3 min; pide confirmación: reinicia el stack y BORRA los volúmenes locales)
+#   ASSUME_YES=1 ./scripts/verify-all.sh   (sin preguntar, p. ej. en CI)
 #   SKIP_GO=1 ./scripts/verify-all.sh  (sin los pasos que requieren Go instalado)
 #
 # Variables: COMPOSE_ARGS (p. ej. "-f docker-compose.yml -f override.yml"), API (por defecto localhost:8080).
@@ -27,6 +28,15 @@ wait_up() { for _ in $(seq 1 90); do [ "$($COMPOSE ps --format '{{.Health}}' 2>/
 reset_stack() { $COMPOSE down -v >/dev/null 2>&1; $COMPOSE up -d >/dev/null 2>&1 && wait_up; }
 
 command -v docker >/dev/null 2>&1 || { echo "Falta Docker. Ejecute ./scripts/preflight.sh"; exit 2; }
+
+# Este script REINICIA el stack con "down -v": borra los volúmenes (journal e historial). Se pide confirmación.
+if [ "${ASSUME_YES:-0}" != 1 ]; then
+  echo "ATENCIÓN: verify-all ejecuta 'docker compose down -v' (varias veces): BORRA los volúmenes del proyecto,"
+  echo "es decir el journal y el historial de Postgres de ESTE compose. No toca otros contenedores ni bases."
+  if [ ! -t 0 ]; then echo "Sin terminal interactiva: defina ASSUME_YES=1 para confirmar."; exit 2; fi
+  read -r -p "Escriba SI para continuar: " ans; [ "$ans" = SI ] || { echo "Cancelado."; exit 1; }
+fi
+export ASSUME_YES=1   # ya confirmado: los scripts hijos no vuelven a preguntar
 
 if [ $HAVE_GO = 1 ]; then
   TAIL=10 step "Tests unitarios y de concurrencia (go test -race)" bash -c 'go vet ./... && go test -race -count=1 ./...'

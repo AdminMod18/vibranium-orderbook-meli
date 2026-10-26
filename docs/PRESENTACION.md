@@ -6,7 +6,7 @@ Objetivo del evaluador: *"Para nosotros es más importante entender cómo llegas
 - [ ] **Agregar como colaboradores** del repositorio a `julianommartins` y `marcos-pinheiro-ml` (GitHub → repositorio → *Settings* → *Collaborators* → *Add people*). El repo debe ser **privado**.
 - [ ] Fusionar la rama `claude/focused-babbage-2ppmql` a `main` (o presentar desde esa rama, pero que se sepa cuál es).
 - [ ] En una carpeta nueva: `git clone` del repo → `./scripts/preflight.sh` → `docker compose up --build -d` → `./scripts/smoke.sh`. *(Esto prueba exactamente lo que probarán ellos.)*
-- [ ] `./scripts/verify-all.sh` en verde en TU máquina (los números del informe son de otra; aquí se confirman los tuyos).
+- [ ] `./scripts/verify-all.sh` en verde en TU máquina (te pedirá escribir `SI`: borra los volúmenes locales) (los números del informe son de otra; aquí se confirman los tuyos).
 - [ ] Docker Desktop abierto, internet disponible y puertos libres (`./scripts/preflight.sh` lo comprueba; si alguno está ocupado, `cp .env.example .env` y cambia ese número).
 - [ ] Antes de la demo: `docker compose down -v && docker compose up -d` (**libro vacío**; tras pruebas de carga el guion no cruza igual).
 - [ ] Abrir en pestañas: Grafana http://localhost:3000, Prometheus http://localhost:9090/alerts, el repo en GitHub.
@@ -66,6 +66,7 @@ Consejo: durante el paso de carga, **mira el dashboard** y cuenta qué se ve (ó
 ## Lo que NO hay que prometer
 - **No** decir que "escala infinito": se midió 16.000/s en un entorno compartido; el límite de diseño es un secuenciador por mercado.
 - **No** decir que hay alta disponibilidad: hay recuperación rápida, no réplica en espera.
+- **No** decir que la API es segura: no tiene autenticación (L16); los puertos de infraestructura están en `127.0.0.1` y sus claves son de demo.
 - **No** afirmar nada sobre la herramienta de monitoreo de Mercado Libre: se usó el estándar abierto de Prometheus y se puede preguntar.
 - Si algo no se probó en su máquina (Windows, Dockerfile completo), decirlo: ver *Limitaciones* en el informe.
 
