@@ -159,7 +159,7 @@ func main() {
 	if late := elapsed - *duration; late > time.Second {
 		fmt.Printf("AVISO: el generador terminó %s después de lo previsto: el sistema no sostuvo el ritmo pedido\n", late.Round(time.Second))
 	}
-	fmt.Printf("latencia            : p50=%s  p90=%s  p99=%s  p99.9=%s  max=%s\n", pct(.5), pct(.9), pct(.99), pct(.999), pct(1))
+	fmt.Printf("latencia            : p50=%s  p90=%s  p95=%s  p99=%s  p99.9=%s  max=%s\n", pct(.5), pct(.9), pct(.95), pct(.99), pct(.999), pct(1))
 	var keys []int
 	for k := range codes {
 		keys = append(keys, k)
