@@ -8,3 +8,19 @@ data/
 jmeter/results/**/results.jtl
 jmeter/results/**/ABORTADA_POR_DISCO.txt
 jmeter.log
+
+# --- ruido que no debe versionarse
+.DS_Store
+Thumbs.db
+*.bundle
+*.tar.gz
+coverage.out
+*.pprof
+jmeter/backups/
+*.jmx.bak
+# JMeter: las corridas de validación (integridad, humo, preparación de estado) y los logs son material de trabajo;
+# solo se versionan las corridas de rendimiento citadas por el informe (jmeter/report/runs.json)
+jmeter/results/**/jmeter.log
+jmeter/results/*-integridad*/
+jmeter/results/*-humo*/
+jmeter/results/*-reinicio-construir-estado/

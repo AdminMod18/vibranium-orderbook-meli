@@ -1,9 +1,0 @@
-etiqueta,codigo_http,mensaje,cantidad
-07 BUY 4 @ P0+100 cruza al precio del MAKER (P0),201,"debe ejecutarse completa con N trade -> {""order"":{""id"":""jmNc-oN"",""user_id"":""jmNc-comprador"",""side"":""BUY"",""pric",1
-08 saldo comprador: pagó 4*P0 (se devolvió la mejora de precio),200,"liquidación del comprador incorrecta -> {""user_id"":""jmNc-comprador"",""brl_free"":N,""brl_held"":N,""vib_free"":N,""vi",1
-"09 saldo vendedor: cobró 4*P0, quedan 6 VIB reservadas",200,"liquidación del vendedor incorrecta -> {""user_id"":""jmNc-vendedor"",""brl_free"":N,""brl_held"":N,""vib_free"":N,""vib_",1
-"10 BUY 10 @ P0: parcial (6 ejecutadas, 4 en el libro)",201,"debe ser parcial: N de N -> {""order"":{""id"":""jmNc-oN"",""user_id"":""jmNc-comprador"",""side"":""BUY"",""price"":N,""qty"":N",1
-11 libro: compra 4 @ P0 y ninguna venta a P0 o menos,200,"libro incoherente -> {""asks"":[{""price"":N,""qty"":N},{""price"":N,""qty"":N},{""price"":N,""qty"":N},{""price"":N,""qty"":N},",1
-12 saldo comprador: 4*P0 reservadas por el remanente,200,"reserva del remanente incorrecta -> {""user_id"":""jmNc-comprador"",""brl_free"":N,""brl_held"":N,""vib_free"":N,""vib_he",1
-13 DELETE de la orden parcial: libera lo reservado,404,"esperado N -> {""code"":""order_not_found"",""message"":""orden no encontrada en el libro""}",1
-14 saldo comprador tras cancelar,200,"no se liberó la reserva -> {""user_id"":""jmNc-comprador"",""brl_free"":N,""brl_held"":N,""vib_free"":N,""vib_held"":N}",1
