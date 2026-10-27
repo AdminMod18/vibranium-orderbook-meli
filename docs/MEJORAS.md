@@ -47,7 +47,7 @@ Prioridad: 🔴 lo preguntarán seguro · 🟠 probable · 🟢 bonus.
 
 | Pri | Pregunta | Respuesta hoy | Siguiente paso |
 |---|---|---|---|
-| 🔴 | ¿Cómo funciona un order book? | Ver `DEFENSA.md` Fase 1 | — |
+| 🔴 | ¿Cómo funciona un order book? | Ver `DEFENSA_TECNICA.md` §2 | — |
 | 🟠 | ¿Self-trade? | Permitido (D9) | Prevención configurable (cancelar taker/maker/ambos) |
 | 🟠 | ¿Órdenes market / IOC / FOK? | Solo límite (D1) | Se montan sobre el mismo `match()` |
 | 🟠 | ¿Comisiones? | No (D20) | Tercera pata en `Settle` |

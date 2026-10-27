@@ -21,8 +21,6 @@
 |---|---|
 | [evidencia/](evidencia/) | Salidas reales de las pruebas (validación final, antes/después) |
 | [../jmeter/report/index.html](../jmeter/report/index.html) | Informe visual de rendimiento con JMeter (ábralo en el navegador) |
-| [DEFENSA.md](DEFENSA.md) | Explicación fase a fase con preguntas probables (complementa a DEFENSA_TECNICA) |
 | [MEJORAS.md](MEJORAS.md) | Backlog de mejoras y siguiente paso de arquitectura |
-| [PRESENTACION.md](PRESENTACION.md) | Guion de la presentación |
 
 La plataforma en Kubernetes (cluster, ingress, observabilidad, caos) está en el repositorio `vibranium-orderbook-infra`.
