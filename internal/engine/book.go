@@ -4,7 +4,7 @@
 // El orden de llegada define quién gana un cruce, así que el matching debe ser
 // secuencial. Se escala haciéndolo rapidísimo (todo en memoria, sin I/O) y
 // dejando que UN solo goroutine lo ejecute; la concurrencia vive fuera
-// (API y cola de entrada). Ver docs/DEFENSA.md.
+// (API y cola de entrada). Ver docs/DECISIONES.md.
 package engine
 
 import (

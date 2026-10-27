@@ -123,7 +123,7 @@ Todas las órdenes aceptadas y saldos auditados en cada escalón; 4 núcleos com
 | 12.000/s | 2,8 ms | 199 ms | 16 |
 | 16.000/s | 9,1 ms | 140 ms | 22 |
 
-El límite es el CPU total de la máquina (la cola casi no se usa): ver el perfil en [DEFENSA.md](DEFENSA.md#fase-6--escala-recuperación-acotada-y-cierre).
+El límite es el CPU total de la máquina (la cola casi no se usa): ver el perfil en [DEFENSA_TECNICA.md §6](DEFENSA_TECNICA.md#6-resultados-de-rendimiento-antes-y-después-y-condiciones-de-ejecución).
 
 ## Cómo diagnosticar (mini-runbook)
 | Síntoma en el dashboard | Mirar | Causa probable |

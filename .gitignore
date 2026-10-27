@@ -24,3 +24,7 @@ jmeter/results/**/jmeter.log
 jmeter/results/*-integridad*/
 jmeter/results/*-humo*/
 jmeter/results/*-reinicio-construir-estado/
+
+# Notas personales de preparación de la presentación: solo locales, no forman parte de la entrega
+docs/PRESENTACION.md
+docs/DEFENSA.md
