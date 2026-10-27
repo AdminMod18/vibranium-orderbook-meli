@@ -1,33 +1,39 @@
-# Vibranium Order Book (MVP)
+# Vibranium Order Book
 
-Libro de ofertas para negociar Vibranium (desafío técnico). Go 1.24.
+Libro de ofertas para negociar **Vibranium en reales (BRL)**, hecho en Go. Desafío técnico de Mercado Libre (Cloud & Platform).
 
-## Levantar todo (Docker) — guía completa en [docs/EJECUTAR_LOCAL.md](docs/EJECUTAR_LOCAL.md)
+![Camino de una orden](docs/img/arquitectura-app.svg)
+
+**Idea central:** un libro de ofertas no admite concurrencia, así que **un solo escritor** ordena todas las órdenes y solo confirma lo que ya está en disco (journal con un `fsync` por lote). Las lecturas e historial salen de Postgres sin frenar al escritor.
+
+## Levantarlo (necesitas solo Docker)
+
 ```bash
-./scripts/preflight.sh            # ¿tengo todo lo necesario?
+docker compose up --build -d     # la primera vez compila y descarga imágenes (unos minutos)
+./scripts/smoke.sh               # termina con SMOKE OK si todo funciona
 ```
-```bash
-docker compose up --build        # API :8080 + Postgres :5432
-curl localhost:8080/healthz
-./scripts/smoke.sh               # prueba de humo end-to-end
-./scripts/verify-all.sh          # TODO: tests + smoke + carga + 6 drills, con tabla PASS/FAIL
-./scripts/demo.sh                # guion interactivo para la presentación
-```
-
-> **Plataforma (Kubernetes):** el despliegue como código (kind, ingress, observabilidad, pruebas de caos) vive en el repo
-> `vibranium-orderbook-infra`. Este repo publica la imagen en GHCR (`.github/workflows/image.yml`) y su CI la prueba allí.
 
 | | |
 |---|---|
 | API | http://localhost:8080 |
-| **Grafana (dashboard)** | http://localhost:3000 |
-| Prometheus / alertas | http://localhost:9090 |
-| Métricas / pprof | http://localhost:9102 |
+| Grafana (dashboard) | http://localhost:3000 |
+| Prometheus y alertas | http://localhost:9090 |
+
+Si algún puerto está ocupado, copia `.env.example` a `.env` y cambia solo ese número. En Windows usa Git Bash. Guía completa: [docs/EJECUTAR_LOCAL.md](docs/EJECUTAR_LOCAL.md).
+
+## Probarlo a mano
 
 ```bash
-docker compose run --rm loadgen -rate 5000 -duration 30s   # genera carga y audita los saldos al final
+curl -XPOST localhost:8080/deposits -d '{"user_id":"alice","brl":100000}'      # primero hay que fondear (centavos)
+curl -XPOST localhost:8080/deposits -d '{"user_id":"bob","vib":50}'
+curl -XPOST localhost:8080/orders   -d '{"id":"s1","user_id":"bob","side":"SELL","price":900,"qty":4}'
+curl -XPOST localhost:8080/orders   -d '{"id":"b1","user_id":"alice","side":"BUY","price":1000,"qty":10}'
+curl localhost:8080/balances/alice
+curl localhost:8080/audit        # verifica que los saldos cuadran
 ```
-![Dashboard](docs/img/dashboard-grafana.png)
+
+Carga a 5.000 órdenes/s con auditoría de saldos al final (corre dentro de Docker):
+`docker compose run --rm loadgen -rate 5000 -duration 30s`
 
 ## Contrato de la API (lo que necesita quien la pruebe)
 | Endpoint | Cuerpo / uso | Respuestas |
@@ -45,53 +51,12 @@ docker compose run --rm loadgen -rate 5000 -duration 30s   # genera carga y audi
 Una orden **ejecuta como máximo 10.000 trades**: si todavía hubiera precios compatibles, el remanente se **cancela** (estado `CANCELLED` con `filled` > 0) y se libera lo reservado.
 **Seguridad (MVP):** la API no tiene autenticación; los puertos de Postgres, Prometheus, Grafana y métricas solo escuchan en `127.0.0.1` y sus claves (`orderbook`, `admin/admin`) son de demo local.
 
-## Probar sin Docker
-```bash
-go test -race ./...
-go run ./cmd/server            # escucha en :8080 (PORT, QUEUE_SIZE configurables)
+## Qué leer (en este orden)
 
-curl -XPOST localhost:8080/deposits -d '{"user_id":"alice","brl":100000}'      # centavos
-curl -XPOST localhost:8080/deposits -d '{"user_id":"bob","vib":50}'
-curl -XPOST localhost:8080/orders   -d '{"id":"s1","user_id":"bob","side":"SELL","price":900,"qty":4}'
-curl -XPOST localhost:8080/orders   -d '{"id":"b1","user_id":"alice","side":"BUY","price":1000,"qty":10}'
-curl localhost:8080/book
-curl localhost:8080/balances/alice
-curl localhost:8080/audit      # verifica que los saldos cuadran
-curl localhost:8080/orders/b1  # historial de una orden y sus trades (requiere DATABASE_URL)
-curl localhost:8080/trades?user_id=alice
-curl localhost:8080/audit/history/alice   # saldo del motor vs recalculado solo desde el historial
-```
+1. [docs/DECISIONES.md](docs/DECISIONES.md): el diseño, su motivación y las limitaciones conocidas.
+2. [docs/DEFENSA_TECNICA.md](docs/DEFENSA_TECNICA.md): arquitectura, invariantes, qué pasa si algo falla, rendimiento medido y riesgos.
+3. [docs/OBSERVABILIDAD.md](docs/OBSERVABILIDAD.md): métricas, 13 alertas y dashboard.
+4. [docs/INFORME_PRUEBAS.md](docs/INFORME_PRUEBAS.md): qué se probó y con qué resultado.
+5. **Kubernetes e infraestructura como código:** repositorio `vibranium-orderbook-infra` (cluster, ingress, pruebas de caos).
 
-## Estado
-Fases 1-6 completas: motor de matching, billeteras con reserva de fondos, API + secuenciador, journal durable con group commit y recuperación, historial en Postgres, observabilidad (Prometheus + Grafana) y recuperación acotada con snapshots.
-
-## Probar resiliencia
-```bash
-./scripts/drill-overload.sh        # sobrecarga: cola diminuta + 512 clientes => 503 sin perder nada
-./scripts/drill-idempotency.sh     # ventana de idempotencia: reciente=409, antiguo=nuevo, reinicio con otra ventana
-./scripts/drill-single-instance.sh # una sola instancia por journal: el 2º proceso/contenedor se rechaza
-./scripts/test-alerts.sh           # pruebas unitarias de las 13 reglas de alerta (promtool, vía Docker)
-./scripts/seed.sh                   # (opcional) fondea alice/bob/carol/dave/erin; --count 100, --brl, --vib; o a mano con POST /deposits
-./scripts/latency-breakdown.sh 10      # descompone la latencia por etapa (cola · matching · fsync · HTTP) con los histogramas de Prometheus
-./scripts/soak.sh 20 5000          # prueba de resistencia: 20 min a 5.000/s con muestreo de memoria, snapshots, disco y reinicio final
-./scripts/drill-kill9.sh          # carga concurrente -> kill -9 -> reinicio -> verifica saldos
-./scripts/drill-postgres-down.sh   # Postgres cae en pleno uso: el matching sigue y el historial se reconcilia
-./scripts/drill-docker-crash.sh    # crash real (kill -9 al proceso) de la app en el compose: Docker la reinicia y recupera el journal
-# tests de integración con Postgres real:
-# (crea una base APARTE: estos tests hacen DROP TABLE y se niegan a correr contra una base cuyo nombre no contenga "test")
-docker compose exec -T postgres psql -U postgres -c "CREATE DATABASE orderbook_test"
-TEST_DATABASE_URL=postgres://postgres:orderbook@localhost:5432/orderbook_test go test ./internal/history
-```
-El estado se guarda en `data/journal.log` (`JOURNAL_PATH`).
-
-## Documentación (para sustentar)
-- [docs/DECISIONES.md](docs/DECISIONES.md) — registro de decisiones, limitaciones conocidas y preguntas para el equipo evaluador.
-- [docs/DEFENSA.md](docs/DEFENSA.md) — explicación fase a fase con preguntas probables.
-- [docs/MEJORAS.md](docs/MEJORAS.md) — backlog de arquitectura: preguntas probables y siguiente paso.
-- [docs/OBSERVABILIDAD.md](docs/OBSERVABILIDAD.md) — métricas, alertas, dashboard, resultados medidos y runbook.
-- [docs/INFORME_PRUEBAS.md](docs/INFORME_PRUEBAS.md) — qué se probó, resultados medidos, hallazgos y limitaciones.
-- [docs/DEFENSA_TECNICA.md](docs/DEFENSA_TECNICA.md) — informe de defensa: arquitectura, decisiones, invariantes, recuperación, rendimiento, riesgos y preguntas de entrevista (con etiquetas hecho/hipótesis/limitación/recomendación).
-- [jmeter/README.md](jmeter/README.md) — planes de JMeter (carga, integridad, recuperación), cómo ejecutarlos y el informe visual de rendimiento.
-- [docs/OPTIMIZACION.md](docs/OPTIMIZACION.md) — fase de optimización: diagnóstico de la latencia, hipótesis verificadas y rechazadas, cambios y resultados antes/después.
-- [docs/PRESENTACION.md](docs/PRESENTACION.md) — guion de la presentación, mensajes clave y preguntas probables.
-- [docs/EJECUTAR_LOCAL.md](docs/EJECUTAR_LOCAL.md) — cómo correrlo en tu máquina.
+Índice completo de la documentación: [docs/README.md](docs/README.md). Comandos de resiliencia y pruebas sin Docker: [docs/COMANDOS.md](docs/COMANDOS.md).

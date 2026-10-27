@@ -4,7 +4,7 @@
 > **[HECHO]** = verificado con una prueba, una medición o el código (se cita dónde) · **[HIPÓTESIS]** = explicación plausible sin demostrar ·
 > **[LIMITACIÓN]** = algo que el sistema no hace o no se probó · **[RECOMENDACIÓN]** = qué haría a continuación.
 > Nada de lo que aquí figura como «hecho» se afirma sin evidencia en el repositorio; lo que falta está en §7 y §8.
-> Rama `claude/focused-babbage-2ppmql`. Esta entrega **está lista para revisión, no para producción** (§8).
+> Versión entregada: `main`. Esta entrega **está lista para revisión, no para producción** (§8).
 
 ## 1. Resumen ejecutivo y objetivo
 
@@ -181,7 +181,7 @@ Informe visual con todas las series (throughput, p50/p90/p95/p99, distribución,
 ## 7. Pruebas aprobadas, fallidas, pendientes y limitaciones
 
 ### 7.1 Validación final ejecutada sobre el commit entregado [HECHO]
-Commit: `1659909` (+ cambios sin commitear del informe) · rama `claude/focused-babbage-2ppmql` · fecha 2026-10-26T16:04Z
+Commit: `1659909` (+ cambios sin commitear del informe) · fecha 2026-10-26T16:04Z
 
 | # | Comando | Duración | Resultado | Log |
 |---|---|---|---|---|

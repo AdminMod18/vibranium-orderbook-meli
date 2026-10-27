@@ -1,6 +1,6 @@
 # Validación final
 
-Commit: `1659909` (+ cambios sin commitear del informe) · rama `claude/focused-babbage-2ppmql` · fecha 2026-10-26T16:04Z
+Commit: `1659909` (+ cambios sin commitear del informe) · fecha 2026-10-26T16:04Z
 
 | # | Comando | Duración | Resultado | Log |
 |---|---|---|---|---|

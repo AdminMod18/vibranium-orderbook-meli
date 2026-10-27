@@ -4,7 +4,7 @@ Objetivo del evaluador: *"Para nosotros es más importante entender cómo llegas
 
 ## Antes (checklist del día anterior)
 - [ ] **Agregar como colaboradores** del repositorio a `julianommartins` y `marcos-pinheiro-ml` (GitHub → repositorio → *Settings* → *Collaborators* → *Add people*). El repo debe ser **privado**.
-- [ ] Fusionar la rama `claude/focused-babbage-2ppmql` a `main` (o presentar desde esa rama, pero que se sepa cuál es).
+- [ ] Confirmar que `main` contiene la versión que se va a presentar (y que el repo es privado con los colaboradores añadidos).
 - [ ] En una carpeta nueva: `git clone` del repo → `./scripts/preflight.sh` → `docker compose up --build -d` → `./scripts/smoke.sh`. *(Esto prueba exactamente lo que probarán ellos.)*
 - [ ] `./scripts/verify-all.sh` en verde en TU máquina (te pedirá escribir `SI`: borra los volúmenes locales) (los números del informe son de otra; aquí se confirman los tuyos).
 - [ ] Docker Desktop abierto, internet disponible y puertos libres (`./scripts/preflight.sh` lo comprueba; si alguno está ocupado, `cp .env.example .env` y cambia ese número).

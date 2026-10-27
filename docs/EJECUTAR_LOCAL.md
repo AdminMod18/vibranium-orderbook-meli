@@ -5,12 +5,10 @@ Pensado para **Windows + Git Bash + Docker Desktop** (también sirve en Linux/ma
 
 ## 0) Una sola vez
 1. Abre **Docker Desktop** y espera a que diga *Running*.
-2. Abre **Git Bash** en la carpeta del repo y trae la rama:
+2. Clona el repositorio y entra en la carpeta (en Windows, desde **Git Bash**):
    ```bash
-   cd ~/OneDrive/Documentos/vibranium-orderbook-meli
-   git fetch origin
-   git checkout claude/focused-babbage-2ppmql
-   git pull
+   git clone <URL-del-repositorio> vibranium-orderbook-meli
+   cd vibranium-orderbook-meli
    ```
 3. Verifica la máquina:
    ```bash

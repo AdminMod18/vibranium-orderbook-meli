@@ -1,2 +1,0 @@
-epoch_s,t_rel_s,orders_ok_per_s,orders_err_per_s,all_requests_per_s,p50_ms,p90_ms,p95_ms,p99_ms,max_ms,active_threads
-1793022952,0,0.0,0.0,4.8,,,,,,1
